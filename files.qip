@@ -3,7 +3,6 @@ set_global_assignment -name VHDL_INPUT_VERSION VHDL_2008
 set_global_assignment -name SYSTEMVERILOG_FILE Arcade-Vastar.sv
 set_global_assignment -name SYSTEMVERILOG_FILE rtl/Vastar.sv
 set_global_assignment -name SYSTEMVERILOG_FILE rtl/Vastar_CPU.sv
-set_global_assignment -name SYSTEMVERILOG_FILE rtl/Vastar_SND.sv
 set_global_assignment -name VERILOG_FILE rtl/pause.v
 set_global_assignment -name VERILOG_FILE rtl/hiscore.v
 set_global_assignment -name VERILOG_FILE rtl/jtframe_frac_cen.v

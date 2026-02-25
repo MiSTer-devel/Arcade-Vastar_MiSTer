@@ -1,7 +1,7 @@
 //============================================================================
 //
-//  Blue Print top-level module
-//  Copyright (C) 2021 Ace
+//  Vastar top-level game module
+//  Copyright (C) 2026 Rodimus
 //
 //  Permission is hereby granted, free of charge, to any person obtaining a
 //  copy of this software and associated documentation files (the "Software"),
@@ -23,14 +23,17 @@
 //
 //============================================================================
 
-module BluePrint
+module Vastar
 (
 	input                reset,
 	input                clk_49m,
 
 	// Player controls (active HIGH, assembled from MiSTer inputs)
+	// p1/p2: {2'b00, btn2, btn1, right, left, down, up}
+	// sys:   {2'b00, service, start2, start1, 1'b0, coin2, coin1}
 	input          [7:0] p1_controls,
 	input          [7:0] p2_controls,
+	input          [7:0] sys_controls,
 
 	// DIP switches (directly from MiSTer OSD)
 	input         [15:0] dip_sw,
@@ -62,47 +65,34 @@ module BluePrint
 	input                hs_write
 );
 
-// Sound interface between CPU and sound board
-wire [7:0] sound_cmd;
-wire       sound_cmd_wr;
-// TEMPORARY: bypass sound board DIP readback until sound is verified working.
-// The sound CPU reads dip_sw[7:0] from AY2 Port A and writes it to AY1 Port A
-// which main CPU reads at 0xC003. Short-circuit this path for testing.
-wire [7:0] dipsw_readback_from_snd;
-wire [7:0] dipsw_readback = dipsw_readback_from_snd;
+// ROM chip selects from selector (index 0 only)
+wire main_rom_cs_i, sub_rom_cs_i, fgtile_cs_i;
+wire sprite0_cs_i, sprite1_cs_i;
+wire bgtile0_cs_i, bgtile1_cs_i;
+wire prom_r_cs_i, prom_g_cs_i, prom_b_cs_i, prom_unk_cs_i;
 
-// ROM loader signals for MISTer (loads ROMs from SD card)
-wire main1_cs_i, main2_cs_i, main3_cs_i, main4_cs_i, main5_cs_i, main6_cs_i;
-wire tile0_cs_i, tile1_cs_i;
-wire spr_r_cs_i, spr_b_cs_i, spr_g_cs_i;
-
-// Filter ioctl_wr for index 0 (CPU board ROMs) and index 1 (sound ROMs)
+// Gate ROM loading to index 0
 wire ioctl_wr_cpu = ioctl_wr && (ioctl_index == 8'd0);
-wire ioctl_wr_snd = ioctl_wr && (ioctl_index == 8'd1);
 
-// Sound ROM chip selects (within index 1's address space)
-wire snd_rom1_cs_i = (ioctl_addr < 25'h1000);
-wire snd_rom2_cs_i = (ioctl_addr >= 25'h1000) && (ioctl_addr < 25'h2000);
-
-// MiSTer data write selector (active for ROM index 0 only)
+// ROM address selector
 selector DLSEL
 (
 	.ioctl_addr(ioctl_addr),
-	.main1_cs(main1_cs_i),
-	.main2_cs(main2_cs_i),
-	.main3_cs(main3_cs_i),
-	.main4_cs(main4_cs_i),
-	.main5_cs(main5_cs_i),
-	.main6_cs(main6_cs_i),
-	.tile0_cs(tile0_cs_i),
-	.tile1_cs(tile1_cs_i),
-	.spr_r_cs(spr_r_cs_i),
-	.spr_b_cs(spr_b_cs_i),
-	.spr_g_cs(spr_g_cs_i)
+	.main_rom_cs(main_rom_cs_i),
+	.sub_rom_cs(sub_rom_cs_i),
+	.fgtile_cs(fgtile_cs_i),
+	.sprite0_cs(sprite0_cs_i),
+	.sprite1_cs(sprite1_cs_i),
+	.bgtile0_cs(bgtile0_cs_i),
+	.bgtile1_cs(bgtile1_cs_i),
+	.prom_r_cs(prom_r_cs_i),
+	.prom_g_cs(prom_g_cs_i),
+	.prom_b_cs(prom_b_cs_i),
+	.prom_unk_cs(prom_unk_cs_i)
 );
 
-// Instantiate main CPU board
-BluePrint_CPU main_pcb
+// Instantiate main CPU board (dual Z80 + AY)
+Vastar_CPU main_pcb
 (
 	.reset(reset),
 	.clk_49m(clk_49m),
@@ -119,25 +109,25 @@ BluePrint_CPU main_pcb
 
 	.p1_controls(p1_controls),
 	.p2_controls(p2_controls),
-	.dipsw_readback(dipsw_readback),
+	.sys_controls(sys_controls),
 
-	.sound_cmd(sound_cmd),
-	.sound_cmd_wr(sound_cmd_wr),
+	.dip_sw(dip_sw),
+	.sound(sound),
 
 	.h_center(h_center),
 	.v_center(v_center),
 
-	.main1_cs_i(main1_cs_i),
-	.main2_cs_i(main2_cs_i),
-	.main3_cs_i(main3_cs_i),
-	.main4_cs_i(main4_cs_i),
-	.main5_cs_i(main5_cs_i),
-	.main6_cs_i(main6_cs_i),
-	.tile0_cs_i(tile0_cs_i),
-	.tile1_cs_i(tile1_cs_i),
-	.spr_r_cs_i(spr_r_cs_i),
-	.spr_b_cs_i(spr_b_cs_i),
-	.spr_g_cs_i(spr_g_cs_i),
+	.main_rom_cs_i(main_rom_cs_i),
+	.sub_rom_cs_i(sub_rom_cs_i),
+	.fgtile_cs_i(fgtile_cs_i),
+	.sprite0_cs_i(sprite0_cs_i),
+	.sprite1_cs_i(sprite1_cs_i),
+	.bgtile0_cs_i(bgtile0_cs_i),
+	.bgtile1_cs_i(bgtile1_cs_i),
+	.prom_r_cs_i(prom_r_cs_i),
+	.prom_g_cs_i(prom_g_cs_i),
+	.prom_b_cs_i(prom_b_cs_i),
+	.prom_unk_cs_i(prom_unk_cs_i),
 	.ioctl_addr(ioctl_addr),
 	.ioctl_data(ioctl_data),
 	.ioctl_wr(ioctl_wr_cpu),
@@ -148,25 +138,6 @@ BluePrint_CPU main_pcb
 	.hs_data_out(hs_data_out),
 	.hs_data_in(hs_data_in),
 	.hs_write(hs_write)
-);
-
-// Instantiate sound PCB
-BluePrint_SND sound_pcb
-(
-	.reset(reset),
-	.pause(pause),
-	.clk_49m(clk_49m),
-	.sound_cmd(sound_cmd),
-	.sound_cmd_wr(sound_cmd_wr),
-	.dip_sw(dip_sw),
-	.dipsw_readback(dipsw_readback_from_snd),
-	.sound(sound),
-	.vblank(video_vblank),
-	.snd_rom1_cs_i(snd_rom1_cs_i),
-	.snd_rom2_cs_i(snd_rom2_cs_i),
-	.ioctl_addr(ioctl_addr),
-	.ioctl_data(ioctl_data),
-	.ioctl_wr(ioctl_wr_snd)
 );
 
 endmodule

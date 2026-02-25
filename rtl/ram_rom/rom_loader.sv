@@ -1,7 +1,7 @@
 //============================================================================
 //
-//  SD card ROM loader and ROM selector for MISTer.
-//  Copyright (C) 2019, 2020 Kitrinx (aka Rysha)
+//  SD card ROM loader and ROM selector for Vastar MiSTer.
+//  Original framework Copyright (C) 2019, 2020 Kitrinx (aka Rysha)
 //
 //  Permission is hereby granted, free of charge, to any person obtaining a
 //  copy of this software and associated documentation files (the "Software"),
@@ -23,40 +23,50 @@
 //
 //============================================================================
 
-// ROM layout for Blue Print (index 0 - main CPU board + graphics):
-// 0x0000 - 0x0FFF = main_rom1 (bp-1.1m)
-// 0x1000 - 0x1FFF = main_rom2 (bp-2.1n)
-// 0x2000 - 0x2FFF = main_rom3 (bp-3.1p)
-// 0x3000 - 0x3FFF = main_rom4 (bp-4.1r)
-// 0x4000 - 0x4FFF = main_rom5 (bp-5.1s)
-// 0x5000 - 0x5FFF = tile_rom0 (bg-1.3c)
-// 0x6000 - 0x6FFF = tile_rom1 (bg-2.3d)
-// 0x7000 - 0x7FFF = spr_rom_r (red.17d)
-// 0x8000 - 0x8FFF = spr_rom_b (blue.18d)
-// 0x9000 - 0x9FFF = spr_rom_g (green.20d)
-// Sound board ROMs loaded separately via index 1
+// ROM layout for Vastar (index 0 - all CPU + GFX ROMs):
+// 0x00000 - 0x07FFF = main_rom  (maincpu: 8 x 4KB ROMs, e_f4..e_n5, fully populated)
+// 0x08000 - 0x09FFF = sub_rom   (sub CPU: e_f2.rom @ 0x0000, e_j2.rom @ 0x1000)
+// 0x0A000 - 0x0BFFF = fgtile    (c_c9.rom, 8KB)
+// 0x0C000 - 0x0DFFF = sprite0   (c_f7.rom, 8KB)
+// 0x0E000 - 0x0FFFF = sprite1   (c_f9.rom, 8KB)
+// 0x10000 - 0x11FFF = bgtile0   (c_n4.rom, 8KB)
+// 0x12000 - 0x13FFF = bgtile1   (c_s4.rom, 8KB)
+// 0x14000 - 0x140FF = prom_r    (tbp24s10.6p - red PROM,   256 bytes)
+// 0x14100 - 0x141FF = prom_g    (tbp24s10.6s - green PROM, 256 bytes)
+// 0x14200 - 0x142FF = prom_b    (tbp24s10.6m - blue PROM,  256 bytes)
+// 0x14300 - 0x143FF = prom_unk  (tbp24s10.8n - unknown,    256 bytes)
+// Total: 0x14400 = 82,944 bytes
 
 module selector
 (
-    input logic [24:0] ioctl_addr,
-    output logic main1_cs, main2_cs, main3_cs, main4_cs, main5_cs, main6_cs,
-    output logic tile0_cs, tile1_cs,
-    output logic spr_r_cs, spr_b_cs, spr_g_cs
+    input  logic [24:0] ioctl_addr,
+    output logic        main_rom_cs,  // 0x00000-0x07FFF (32KB address space, 8KB each ROM × 8)
+    output logic        sub_rom_cs,   // 0x08000-0x09FFF (8KB: 2 × 4KB)
+    output logic        fgtile_cs,    // 0x0A000-0x0BFFF (8KB)
+    output logic        sprite0_cs,   // 0x0C000-0x0DFFF (8KB)
+    output logic        sprite1_cs,   // 0x0E000-0x0FFFF (8KB)
+    output logic        bgtile0_cs,   // 0x10000-0x11FFF (8KB)
+    output logic        bgtile1_cs,   // 0x12000-0x13FFF (8KB)
+    output logic        prom_r_cs,    // 0x14000-0x140FF (256B)
+    output logic        prom_g_cs,    // 0x14100-0x141FF (256B)
+    output logic        prom_b_cs,    // 0x14200-0x142FF (256B)
+    output logic        prom_unk_cs   // 0x14300-0x143FF (256B)
 );
     always_comb begin
-        {main1_cs, main2_cs, main3_cs, main4_cs, main5_cs, main6_cs,
-         tile0_cs, tile1_cs, spr_r_cs, spr_b_cs, spr_g_cs} = 0;
-        if(ioctl_addr < 'h1000)      main1_cs = 1;
-        else if(ioctl_addr < 'h2000) main2_cs = 1;
-        else if(ioctl_addr < 'h3000) main3_cs = 1;
-        else if(ioctl_addr < 'h4000) main4_cs = 1;
-        else if(ioctl_addr < 'h5000) main5_cs = 1;
-        else if(ioctl_addr < 'h6000) main6_cs = 1;
-        else if(ioctl_addr < 'h7000) tile0_cs = 1;
-        else if(ioctl_addr < 'h8000) tile1_cs = 1;
-        else if(ioctl_addr < 'h9000) spr_r_cs = 1;
-        else if(ioctl_addr < 'hA000) spr_b_cs = 1;
-        else if(ioctl_addr < 'hB000) spr_g_cs = 1;
+        {main_rom_cs, sub_rom_cs, fgtile_cs, sprite0_cs, sprite1_cs,
+         bgtile0_cs, bgtile1_cs, prom_r_cs, prom_g_cs, prom_b_cs, prom_unk_cs} = 11'd0;
+
+        if      (ioctl_addr < 25'h08000) main_rom_cs = 1;
+        else if (ioctl_addr < 25'h0A000) sub_rom_cs  = 1;
+        else if (ioctl_addr < 25'h0C000) fgtile_cs   = 1;
+        else if (ioctl_addr < 25'h0E000) sprite0_cs  = 1;
+        else if (ioctl_addr < 25'h10000) sprite1_cs  = 1;
+        else if (ioctl_addr < 25'h12000) bgtile0_cs  = 1;
+        else if (ioctl_addr < 25'h14000) bgtile1_cs  = 1;
+        else if (ioctl_addr < 25'h14100) prom_r_cs   = 1;
+        else if (ioctl_addr < 25'h14200) prom_g_cs   = 1;
+        else if (ioctl_addr < 25'h14300) prom_b_cs   = 1;
+        else if (ioctl_addr < 25'h14400) prom_unk_cs = 1;
     end
 endmodule
 
@@ -64,17 +74,89 @@ endmodule
 // EPROMS //
 ////////////
 
-// Generic 4KB ROM module (12-bit address)
+// Main CPU ROM — 32KB (15-bit address), all 8KB populated at 0x0000-0x7FFF
+module eprom_32k
+(
+    input  logic        CLK,
+    input  logic        CLK_DL,
+    input  logic [14:0] ADDR,
+    input  logic [24:0] ADDR_DL,
+    input  logic [7:0]  DATA_IN,
+    input  logic        CS_DL,
+    input  logic        WR,
+    output logic [7:0]  DATA
+);
+    dpram_dc #(.widthad_a(15)) rom
+    (
+        .clock_a(CLK),
+        .address_a(ADDR[14:0]),
+        .q_a(DATA[7:0]),
+        .clock_b(CLK_DL),
+        .address_b(ADDR_DL[14:0]),
+        .data_b(DATA_IN),
+        .wren_b(WR & CS_DL)
+    );
+endmodule
+
+// Generic 8KB ROM module (13-bit address) — sub CPU ROM and graphics ROMs
+module eprom_8k
+(
+    input  logic        CLK,
+    input  logic        CLK_DL,
+    input  logic [12:0] ADDR,
+    input  logic [24:0] ADDR_DL,
+    input  logic [7:0]  DATA_IN,
+    input  logic        CS_DL,
+    input  logic        WR,
+    output logic [7:0]  DATA
+);
+    dpram_dc #(.widthad_a(13)) rom
+    (
+        .clock_a(CLK),
+        .address_a(ADDR[12:0]),
+        .q_a(DATA[7:0]),
+        .clock_b(CLK_DL),
+        .address_b(ADDR_DL[12:0]),
+        .data_b(DATA_IN),
+        .wren_b(WR & CS_DL)
+    );
+endmodule
+
+// 256-byte ROM module (8-bit address) — color PROMs
+module eprom_256b
+(
+    input  logic       CLK,
+    input  logic       CLK_DL,
+    input  logic [7:0] ADDR,
+    input  logic [24:0] ADDR_DL,
+    input  logic [7:0]  DATA_IN,
+    input  logic        CS_DL,
+    input  logic        WR,
+    output logic [7:0]  DATA
+);
+    dpram_dc #(.widthad_a(8)) rom
+    (
+        .clock_a(CLK),
+        .address_a(ADDR[7:0]),
+        .q_a(DATA[7:0]),
+        .clock_b(CLK_DL),
+        .address_b(ADDR_DL[7:0]),
+        .data_b(DATA_IN),
+        .wren_b(WR & CS_DL)
+    );
+endmodule
+
+// Generic 4KB ROM module (12-bit address) — kept for future use
 module eprom_4k
 (
-    input logic        CLK,
-    input logic        CLK_DL,
-    input logic [11:0] ADDR,
-    input logic [24:0] ADDR_DL,
-    input logic [7:0]  DATA_IN,
-    input logic        CS_DL,
-    input logic        WR,
-    output logic [7:0] DATA
+    input  logic        CLK,
+    input  logic        CLK_DL,
+    input  logic [11:0] ADDR,
+    input  logic [24:0] ADDR_DL,
+    input  logic [7:0]  DATA_IN,
+    input  logic        CS_DL,
+    input  logic        WR,
+    output logic [7:0]  DATA
 );
     dpram_dc #(.widthad_a(12)) rom
     (
@@ -87,4 +169,3 @@ module eprom_4k
         .wren_b(WR & CS_DL)
     );
 endmodule
-

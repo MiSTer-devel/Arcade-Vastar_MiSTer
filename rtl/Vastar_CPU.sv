@@ -1,31 +1,22 @@
 //============================================================================
 //
-//  Blue Print main CPU board model
+//  Vastar CPU board — Phase 1: Dual CPU + Memory Map + ROM Layout
 //  Copyright (C) 2026 Rodimus
 //
-//  Permission is hereby granted, free of charge, to any person obtaining a
-//  copy of this software and associated documentation files (the "Software"),
-//  to deal in the Software without restriction, including without limitation
-//  the rights to use, copy, modify, merge, publish, distribute, sublicense,
-//  and/or sell copies of the Software, and to permit persons to whom the
-//  Software is furnished to do so, subject to the following conditions:
+//  MAME reference: vastar.cpp, vastar_viddev.cpp
+//  Hardware: Z80 CPU1 + Z80 CPU2 @ 3.072 MHz (XTAL 18.432 / 6)
+//            AY-3-8910 @ 1.536 MHz (18.432 / 12)
+//  Screen: 256x256 total, visible 256x224 (lines 16-239), 60.58 Hz
 //
-//  The above copyright notice and this permission notice shall be included in
-//  all copies or substantial portions of the Software.
-//
-//  THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-//  IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-//  FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-//  AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-//  LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
-//  FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
-//  DEALINGS IN THE SOFTWARE.
+//  Phase 1 goal: Both CPUs boot from ROM, shared RAM communication,
+//  correct I/O decoding, interrupt generation.
+//  Video: forced red screen to verify timing path.
 //
 //============================================================================
 
-module BluePrint_CPU
+module Vastar_CPU
 (
-	input         reset,
+	input         reset,      // Active HIGH: 0 = in reset, 1 = running
 	input         clk_49m,
 
 	// Video outputs
@@ -34,41 +25,46 @@ module BluePrint_CPU
 	output        video_hblank, video_vblank,
 	output        ce_pix,
 
-	// Player controls (active HIGH, directly from MiSTer)
-	input   [7:0] p1_controls,    // {coin, start2, start1, btn1, left, down, right, up}
-	input   [7:0] p2_controls,    // {3'b111, btn1, left, down, right, up}
+	// Player controls (active HIGH from MiSTer)
+	// p1/p2: {2'b00, btn2, btn1, right, left, down, up}
+	// sys:   {2'b00, service, start2, start1, 1'b0, coin2, coin1}
+	input   [7:0] p1_controls,
+	input   [7:0] p2_controls,
+	input   [7:0] sys_controls,
 
-	// DIP switch readback from sound board
-	input   [7:0] dipsw_readback, // from sound board AY1 port A
+	// DIP switches
+	input  [15:0] dip_sw,
 
-	// Sound interface (directly to sound board)
-	output  [7:0] sound_cmd,
-	output        sound_cmd_wr,
+	// Audio (Phase 1: silent)
+	output signed [15:0] sound,
 
 	// Screen centering
 	input   [3:0] h_center, v_center,
 
-	// ROM loading
-	input         main1_cs_i, main2_cs_i, main3_cs_i, main4_cs_i, main5_cs_i, main6_cs_i,
-	input         tile0_cs_i, tile1_cs_i,
-	input         spr_r_cs_i, spr_b_cs_i, spr_g_cs_i,
+	// ROM loading (from selector, index 0 only)
+	input         main_rom_cs_i, sub_rom_cs_i, fgtile_cs_i,
+	input         sprite0_cs_i, sprite1_cs_i,
+	input         bgtile0_cs_i, bgtile1_cs_i,
+	input         prom_r_cs_i, prom_g_cs_i, prom_b_cs_i, prom_unk_cs_i,
 	input  [24:0] ioctl_addr,
 	input   [7:0] ioctl_data,
 	input         ioctl_wr,
 
 	input         pause,
 
-	// Hiscore interface
+	// Hiscore interface (stubbed for Phase 1)
 	input  [15:0] hs_address,
 	input   [7:0] hs_data_in,
 	output  [7:0] hs_data_out,
 	input         hs_write
 );
 
+// Hiscore stubbed — no dedicated work RAM in Vastar CPU1 map
+assign hs_data_out = 8'hFF;
+
 //------------------------------------------------------- Clock enables -------------------------------------------------------//
 
-// Generate ~5 MHz pixel clock enable from 49.152 MHz
-// 49.152 * 89/875 ≈ 4.997 MHz
+// Pixel clock: ~5 MHz (49.152 * 89/875 ≈ 4.997 MHz) via fractional divider
 wire [1:0] pix_cen_o;
 jtframe_frac_cen #(2) pix_cen
 (
@@ -79,21 +75,21 @@ jtframe_frac_cen #(2) pix_cen
 	.cenb()
 );
 wire cen_5m = pix_cen_o[0];
-
-// Generate ~3.5 MHz CPU clock enable from 49.152 MHz
-// 49.152 * 5/70 ≈ 3.511 MHz
-wire [1:0] cpu_cen_o;
-jtframe_frac_cen #(2) cpu_cen
-(
-	.clk(clk_49m),
-	.n(10'd5),
-	.m(10'd70),
-	.cen(cpu_cen_o),
-	.cenb()
-);
-wire cen_3m5 = cpu_cen_o[0];
-
 assign ce_pix = cen_5m;
+
+// CPU clock: 49.152 / 16 = 3.072 MHz (matches hardware: 18.432 / 6 = 3.072 MHz)
+reg [3:0] cpu_div = 4'd0;
+always_ff @(posedge clk_49m) begin
+	cpu_div <= cpu_div + 4'd1;
+end
+wire cen_cpu = (cpu_div == 4'd0);
+
+// AY clock: every other CPU enable = 1.536 MHz (matches hardware: 18.432 / 12)
+reg ay_toggle = 1'b0;
+always_ff @(posedge clk_49m) begin
+	if (cen_cpu) ay_toggle <= ~ay_toggle;
+end
+wire cen_ay = cen_cpu & ~ay_toggle;
 
 //-------------------------------------------------------- Video timing --------------------------------------------------------//
 
@@ -111,8 +107,6 @@ always_ff @(posedge clk_49m) begin
 	end
 end
 
-wire [8:0] h_cnt = (base_h_cnt <= 9'd248) ? base_h_cnt : 9'd248;
-
 // Blanking
 wire hblk = (base_h_cnt >= 9'd256);
 wire vblk = (v_cnt < 9'd16) | (v_cnt >= 9'd240);
@@ -120,7 +114,7 @@ assign video_hblank = hblk;
 assign video_vblank = vblk;
 
 // Sync generation with screen centering offsets
-wire [8:0] hs_start = 9'd280 + {5'd0, h_center};  // Was 9'd280 + {5'd0, h_center};
+wire [8:0] hs_start = 9'd280 + {5'd0, h_center};
 wire [8:0] hs_end   = hs_start + 9'd32;
 wire [8:0] vs_start = 9'd248 + {5'd0, v_center};
 wire [8:0] vs_end   = vs_start + 9'd4;
@@ -128,531 +122,364 @@ assign video_hsync = (base_h_cnt >= hs_start && base_h_cnt < hs_end);
 assign video_vsync = (v_cnt >= vs_start && v_cnt < vs_end);
 assign video_csync = ~(video_hsync ^ video_vsync);
 
-//------------------------------------------------------------ CPU -------------------------------------------------------------//
+//------------------------------------------------------- CPU1 — Main ---------------------------------------------------------//
 
-// Main CPU - Zilog Z80 (T80s soft core)
-wire [15:0] z80_A;
-wire [7:0] z80_Dout;
-wire n_mreq, n_iorq, n_rd, n_wr, n_rfsh, n_m1;
-T80s cpu
+wire [15:0] cpu1_A;
+wire [7:0]  cpu1_Dout;
+wire        cpu1_WR_n, cpu1_RD_n, cpu1_MREQ_n, cpu1_IORQ_n, cpu1_M1_n, cpu1_RFSH_n;
+
+T80s cpu1
 (
 	.RESET_n(reset),
 	.CLK(clk_49m),
-	.CEN(cen_3m5 & ~pause),
-	.INT_n(n_irq),
-	.NMI_n(1'b1),
+	.CEN(cen_cpu & ~pause),
 	.WAIT_n(1'b1),
-	.MREQ_n(n_mreq),
-	.IORQ_n(n_iorq),
-	.RD_n(n_rd),
-	.WR_n(n_wr),
-	.RFSH_n(n_rfsh),
-	.M1_n(n_m1),
-	.A(z80_A),
-	.DI(z80_Din),
-	.DO(z80_Dout)
+	.INT_n(1'b1),
+	.NMI_n(~cpu1_nmi),
+	.M1_n(cpu1_M1_n),
+	.MREQ_n(cpu1_MREQ_n),
+	.IORQ_n(cpu1_IORQ_n),
+	.RD_n(cpu1_RD_n),
+	.WR_n(cpu1_WR_n),
+	.RFSH_n(cpu1_RFSH_n),
+	.A(cpu1_A),
+	.DI(cpu1_Din),
+	.DO(cpu1_Dout)
 );
 
-//--------------------------------------------------------- Interrupts ---------------------------------------------------------//
+//------------------------------------------------------ CPU1 Interrupts ------------------------------------------------------//
 
-// VBlank IRQ (irq0_line_hold style): assert on VBlank rising edge, clear on IORQ+M1
-reg n_irq = 1'b1;
-reg vblk_last = 1'b0;
-wire irq_ack = ~n_iorq & ~n_m1;
+// CPU1: NMI on vblank rising edge, gated by mainlatch[0] (nmi_mask)
+// Z80 NMI is edge-triggered — a single-cycle pulse is sufficient
+reg cpu1_nmi  = 1'b0;
+reg vblk_prev = 1'b0;
 always_ff @(posedge clk_49m) begin
 	if (!reset) begin
-		n_irq <= 1'b1;
-		vblk_last <= 1'b0;
+		cpu1_nmi  <= 1'b0;
+		vblk_prev <= 1'b0;
 	end else begin
-		if (irq_ack)
-			n_irq <= 1'b1;
-		else if (vblk && !vblk_last)
-			n_irq <= 1'b0;
-		vblk_last <= vblk;
+		vblk_prev <= vblk;
+		cpu1_nmi  <= (vblk && !vblk_prev && nmi_mask);
 	end
 end
 
-//------------------------------------------------------ Address decoding ------------------------------------------------------//
+//-------------------------------------------------- CPU1 Address Decoding ----------------------------------------------------//
 
-wire mem_valid = ~n_mreq & n_rfsh;
-wire cs_rom    = mem_valid & ~z80_A[15] & (z80_A[14:13] != 2'b11); // 0x0000-0x5FFF
-wire cs_wram   = mem_valid & (z80_A[15:11] == 5'b10000);            // 0x8000-0x87FF
-wire cs_vram   = mem_valid & (z80_A[15:12] == 4'h9);                // 0x9000-0x9FFF
-wire cs_scroll = mem_valid & (z80_A[15:8]  == 8'hA0);               // 0xA000-0xA0FF
-wire cs_sprite = mem_valid & (z80_A[15:8]  == 8'hB0);               // 0xB000-0xB0FF
-wire cs_io_c   = mem_valid & (z80_A[15:12] == 4'hC);                // 0xC000-0xCFFF
-wire cs_sndcmd = mem_valid & (z80_A[15:12] == 4'hD) & ~n_wr;        // 0xD000 write
-wire cs_e000   = mem_valid & (z80_A[15:12] == 4'hE);                // 0xE000
-wire cs_cram   = mem_valid & (z80_A[15:12] == 4'hF);                // 0xF000-0xFFFF
+wire cpu1_mem_valid = ~cpu1_MREQ_n & cpu1_RFSH_n;
 
-//------------------------------------------------------------ ROMs ------------------------------------------------------------//
+wire cs_rom      = cpu1_mem_valid & ~cpu1_A[15];                                           // 0x0000-0x7FFF
+wire cs_bg1      = cpu1_mem_valid & ((cpu1_A[15:12] == 4'h8) |                             // 0x8000-0x8FFF
+                                     (cpu1_A[15:12] == 4'hA));                             // 0xA000-0xAFFF (mirror)
+wire cs_bg0      = cpu1_mem_valid & ((cpu1_A[15:12] == 4'h9) |                             // 0x9000-0x9FFF
+                                     (cpu1_A[15:12] == 4'hB));                             // 0xB000-0xBFFF (mirror)
+wire cs_priority = cpu1_mem_valid & (cpu1_A[15:0] == 16'hC000);                            // 0xC000 (write only)
+wire cs_fgvram   = cpu1_mem_valid & (cpu1_A[15:12] == 4'hC) & (cpu1_A[11:10] != 2'b00);  // 0xC400-0xCFFF
+wire cs_watchdog = cpu1_mem_valid & (cpu1_A[15:12] == 4'hE);                               // 0xE000
+wire cs_shared   = cpu1_mem_valid & (cpu1_A[15:11] == 5'b11110);                           // 0xF000-0xF7FF
 
-// Main program ROMs (5x 4KB)
-wire [7:0] rom1_D, rom2_D, rom3_D, rom4_D, rom5_D, rom6_D;
-eprom_4k main_rom1(.CLK(clk_49m), .ADDR(z80_A[11:0]), .CLK_DL(clk_49m), .ADDR_DL(ioctl_addr), .DATA_IN(ioctl_data), .CS_DL(main1_cs_i), .WR(ioctl_wr), .DATA(rom1_D));
-eprom_4k main_rom2(.CLK(clk_49m), .ADDR(z80_A[11:0]), .CLK_DL(clk_49m), .ADDR_DL(ioctl_addr), .DATA_IN(ioctl_data), .CS_DL(main2_cs_i), .WR(ioctl_wr), .DATA(rom2_D));
-eprom_4k main_rom3(.CLK(clk_49m), .ADDR(z80_A[11:0]), .CLK_DL(clk_49m), .ADDR_DL(ioctl_addr), .DATA_IN(ioctl_data), .CS_DL(main3_cs_i), .WR(ioctl_wr), .DATA(rom3_D));
-eprom_4k main_rom4(.CLK(clk_49m), .ADDR(z80_A[11:0]), .CLK_DL(clk_49m), .ADDR_DL(ioctl_addr), .DATA_IN(ioctl_data), .CS_DL(main4_cs_i), .WR(ioctl_wr), .DATA(rom4_D));
-eprom_4k main_rom5(.CLK(clk_49m), .ADDR(z80_A[11:0]), .CLK_DL(clk_49m), .ADDR_DL(ioctl_addr), .DATA_IN(ioctl_data), .CS_DL(main5_cs_i), .WR(ioctl_wr), .DATA(rom5_D));
-eprom_4k main_rom6(.CLK(clk_49m), .ADDR(z80_A[11:0]), .CLK_DL(clk_49m), .ADDR_DL(ioctl_addr), .DATA_IN(ioctl_data), .CS_DL(main6_cs_i), .WR(ioctl_wr), .DATA(rom6_D));
+// CPU1 I/O: mainlatch at ports 0x00-0x07
+wire cs_mainlatch = ~cpu1_IORQ_n & ~cpu1_WR_n & (cpu1_A[3:0] <= 4'h7);
 
-// ROM data mux based on address
-wire [7:0] rom_D = (z80_A[14:12] == 3'd0) ? rom1_D :
-                   (z80_A[14:12] == 3'd1) ? rom2_D :
-                   (z80_A[14:12] == 3'd2) ? rom3_D :
-                   (z80_A[14:12] == 3'd3) ? rom4_D :
-                   (z80_A[14:12] == 3'd4) ? rom5_D :
-                   (z80_A[14:12] == 3'd5) ? rom6_D :
-                   8'hFF;
+//------------------------------------------------------ CPU1 Mainlatch -------------------------------------------------------//
 
-// Tile ROMs (2x 4KB) — addressed by rendering pipeline
-wire [7:0] tile0_D, tile1_D;
-reg  [11:0] tile_render_addr;
-eprom_4k tile_rom0(.CLK(clk_49m), .ADDR(tile_render_addr), .CLK_DL(clk_49m), .ADDR_DL(ioctl_addr), .DATA_IN(ioctl_data), .CS_DL(tile0_cs_i), .WR(ioctl_wr), .DATA(tile0_D));
-eprom_4k tile_rom1(.CLK(clk_49m), .ADDR(tile_render_addr), .CLK_DL(clk_49m), .ADDR_DL(ioctl_addr), .DATA_IN(ioctl_data), .CS_DL(tile1_cs_i), .WR(ioctl_wr), .DATA(tile1_D));
-
-// Sprite ROMs (3x 4KB) — addressed by sprite scanner
-wire [7:0] spr_r_D, spr_b_D, spr_g_D;
-reg  [11:0] spr_render_addr;
-eprom_4k spr_rom_r(.CLK(clk_49m), .ADDR(spr_render_addr), .CLK_DL(clk_49m), .ADDR_DL(ioctl_addr), .DATA_IN(ioctl_data), .CS_DL(spr_r_cs_i), .WR(ioctl_wr), .DATA(spr_r_D));
-eprom_4k spr_rom_b(.CLK(clk_49m), .ADDR(spr_render_addr), .CLK_DL(clk_49m), .ADDR_DL(ioctl_addr), .DATA_IN(ioctl_data), .CS_DL(spr_b_cs_i), .WR(ioctl_wr), .DATA(spr_b_D));
-eprom_4k spr_rom_g(.CLK(clk_49m), .ADDR(spr_render_addr), .CLK_DL(clk_49m), .ADDR_DL(ioctl_addr), .DATA_IN(ioctl_data), .CS_DL(spr_g_cs_i), .WR(ioctl_wr), .DATA(spr_g_D));
-
-//-------------------------------------------------------------- RAM -----------------------------------------------------------//
-
-// Work RAM (2KB, dual-port for hiscore)
-wire [7:0] wram_D;
-dpram_dc #(.widthad_a(11)) work_ram
-(
-	.clock_a(clk_49m),
-	.wren_a(cs_wram & ~n_wr),
-	.address_a(z80_A[10:0]),
-	.data_a(z80_Dout),
-	.q_a(wram_D),
-	.clock_b(clk_49m),
-	.wren_b(hs_write),
-	.address_b(hs_address[10:0]),
-	.data_b(hs_data_in),
-	.q_b(hs_data_out)
-);
-
-// Video RAM (1KB) — port A: CPU, port B: video rendering
-wire [7:0] vram_cpu_D, vram_render_D;
-reg  [9:0] vram_render_addr;
-dpram_dc #(.widthad_a(10)) video_ram
-(
-	.clock_a(clk_49m), .wren_a(cs_vram & ~n_wr),
-	.address_a(z80_A[9:0]), .data_a(z80_Dout), .q_a(vram_cpu_D),
-	.clock_b(clk_49m), .wren_b(1'b0),
-	.address_b(vram_render_addr), .data_b(8'd0), .q_b(vram_render_D)
-);
-
-// Color RAM (1KB) — port A: CPU, port B: video rendering
-wire [7:0] cram_cpu_D, cram_render_D;
-reg  [9:0] cram_render_addr;
-dpram_dc #(.widthad_a(10)) color_ram
-(
-	.clock_a(clk_49m), .wren_a(cs_cram & ~n_wr),
-	.address_a(z80_A[9:0]), .data_a(z80_Dout), .q_a(cram_cpu_D),
-	.clock_b(clk_49m), .wren_b(1'b0),
-	.address_b(cram_render_addr), .data_b(8'd0), .q_b(cram_render_D)
-);
-
-// Scroll RAM (256 bytes) — port A: CPU, port B: video rendering
-wire [7:0] scroll_cpu_D, scroll_render_D;
-reg  [7:0] scroll_render_addr;
-dpram_dc #(.widthad_a(8)) scroll_ram
-(
-	.clock_a(clk_49m), .wren_a(cs_scroll & ~n_wr),
-	.address_a(z80_A[7:0]), .data_a(z80_Dout), .q_a(scroll_cpu_D),
-	.clock_b(clk_49m), .wren_b(1'b0),
-	.address_b(scroll_render_addr), .data_b(8'd0), .q_b(scroll_render_D)
-);
-
-// Sprite RAM (256 bytes) — port A: CPU, port B: sprite scanner
-wire [7:0] sprite_cpu_D, sprite_scan_D;
-reg  [7:0] sprite_scan_addr;
-dpram_dc #(.widthad_a(8)) sprite_ram
-(
-	.clock_a(clk_49m), .wren_a(cs_sprite & ~n_wr),
-	.address_a(z80_A[7:0]), .data_a(z80_Dout), .q_a(sprite_cpu_D),
-	.clock_b(clk_49m), .wren_b(1'b0),
-	.address_b(sprite_scan_addr), .data_b(8'd0), .q_b(sprite_scan_D)
-);
-
-//-------------------------------------------------------- I/O registers -------------------------------------------------------//
-
-// Flip screen and gfx_bank (0xE000 write)
-reg flip = 1'b0;
-reg gfx_bank = 1'b0;
-always_ff @(posedge clk_49m) begin
-	if (!reset) begin
-		flip <= 1'b0;
-		gfx_bank <= 1'b0;
-	end else if (cen_3m5 && cs_e000 && ~n_wr) begin
-		flip <= ~z80_Dout[1];
-		gfx_bank <= z80_Dout[2];
-	end
-end
-
-// Sound command (0xD000 write)
-reg [7:0] snd_cmd_reg = 8'd0;
-reg snd_cmd_wr_reg = 1'b0;
-always_ff @(posedge clk_49m) begin
-	snd_cmd_wr_reg <= 1'b0;
-	if (cen_3m5 && cs_sndcmd) begin
-		snd_cmd_reg <= z80_Dout;
-		snd_cmd_wr_reg <= 1'b1;
-	end
-end
-assign sound_cmd = snd_cmd_reg;
-assign sound_cmd_wr = snd_cmd_wr_reg;
-
-//---------------------------------------------------- CPU data input mux -----------------------------------------------------//
-
-wire [7:0] z80_Din = cs_rom                                ? rom_D :
-                     (cs_wram & n_wr)                       ? wram_D :
-                     (cs_vram & n_wr)                       ? vram_cpu_D :
-                     (cs_cram & n_wr)                       ? cram_cpu_D :
-                     (cs_scroll & n_wr)                     ? scroll_cpu_D :
-                     (cs_sprite & n_wr)                     ? sprite_cpu_D :
-                     (cs_io_c & ~n_rd & (z80_A[1:0] == 2'b00)) ? p1_controls :
-                     (cs_io_c & ~n_rd & (z80_A[1:0] == 2'b01)) ? p2_controls :
-                     (cs_io_c & ~n_rd & (z80_A[1:0] == 2'b11)) ? dipsw_readback :
-                     8'hFF;
-
-//--- Tilemap rendering pipeline ---
-//
-// TILEMAP_SCAN_COLS_FLIP_X layout: tile_index = (31 - col) * 32 + row
-// VRAM/CRAM address: {(31 - screen_col), tile_row}  (column-major, X-flipped)
-//
-// Timeline (all on cen_5m):
-//   fine_x=0: Transfer pipe→shifts. Start fetch for current col: set scroll_render_addr.
-//   fine_x=1: Scroll data ready. Compute scrolled_y. Set vram/cram addr.
-//   fine_x=2: Wait for VRAM/CRAM.
-//   fine_x=3: VRAM/CRAM data ready. Compute tile ROM addr. Update prev_bank_bit.
-//   fine_x=4: Tile ROM data ready. Latch into pipe_tile0/pipe_tile1.
-//   fine_x=5,6,7: Shift pixels out (MSB first).
-
-reg [7:0] tile_shift0, tile_shift1;   // Active shift registers (bit7 = current pixel)
-reg [6:0] tile_color_latch;           // Color byte latched for active column
-reg       tile_priority_latch;        // Priority bit for active column
-reg       prev_bank_bit;              // cram[6] from previous column (bank quirk)
-reg [4:0] latched_col;               // screen_col captured at fine_x=0
-reg [7:0] pipe_tile0, pipe_tile1;    // Pre-fetched tile ROM bytes
-reg [6:0] pipe_color;                // Pre-fetched color byte
-reg       pipe_priority;             // Pre-fetched priority bit
-reg [2:0] pipe_fine_y;              // Fine Y for ROM address
-
-wire [4:0] screen_col  = h_cnt[7:3];
-wire [2:0] fine_x      = h_cnt[2:0];
-wire [7:0] screen_y    = v_cnt[7:0];
-wire visible_line = (v_cnt >= 9'd16) && (v_cnt < 9'd240);
-
-always_ff @(posedge clk_49m) begin
-	if (!reset) begin
-		tile_shift0         <= 8'd0;
-		tile_shift1         <= 8'd0;
-		tile_color_latch    <= 7'd0;
-		tile_priority_latch <= 1'b0;
-		prev_bank_bit       <= 1'b0;
-		latched_col         <= 5'd0;
-		pipe_tile0          <= 8'd0;
-		pipe_tile1          <= 8'd0;
-		pipe_color          <= 7'd0;
-		pipe_priority       <= 1'b0;
-		pipe_fine_y         <= 3'd0;
-	end else if (cen_5m) begin
-		if (!visible_line) begin
-			tile_shift0 <= 8'd0;
-			tile_shift1 <= 8'd0;
-			if (v_cnt == 9'd15 && h_cnt == 9'd0)
-				prev_bank_bit <= 1'b0;
-		end else begin
-			case (fine_x)
-
-				// fine_x=0: Transfer pipe to shift registers.
-				//           Begin fetch for current column.
-				3'd0: begin
-					tile_shift0         <= pipe_tile0;
-					tile_shift1         <= pipe_tile1;
-					tile_color_latch    <= pipe_color;
-					tile_priority_latch <= pipe_priority;
-					latched_col         <= screen_col;
-					// scroll_ram[(30 - scr_col) & 0xFF]
-					scroll_render_addr  <= 8'd30 - {3'd0, screen_col};
-				end
-
-				// fine_x=1: Scroll data ready. Compute scrolled Y, set VRAM/CRAM addr.
-				3'd1: begin
-					begin
-						reg [7:0] scrolled_y;
-						scrolled_y       = screen_y + scroll_render_D;
-						pipe_fine_y      <= scrolled_y[2:0];
-						// TILEMAP_SCAN_COLS_FLIP_X: VRAM col 0 = rightmost screen col (31)
-						vram_render_addr <= {(5'd30 - latched_col), scrolled_y[7:3]};  // Test Change From 5'd31
-						cram_render_addr <= {(5'd30 - latched_col), scrolled_y[7:3]};  // Test Change From 5'd31
-					end
-					tile_shift0 <= {tile_shift0[6:0], 1'b0};
-					tile_shift1 <= {tile_shift1[6:0], 1'b0};
-				end
-
-				// fine_x=2: Wait for VRAM/CRAM output to settle.
-				3'd2: begin
-					tile_shift0 <= {tile_shift0[6:0], 1'b0};
-					tile_shift1 <= {tile_shift1[6:0], 1'b0};
-				end
-
-				// fine_x=3: VRAM/CRAM data ready. Compute tile ROM address.
-				3'd3: begin
-					pipe_color       <= cram_render_D[6:0];
-					pipe_priority    <= cram_render_D[7];
-					// Bank bit from PREVIOUS column's cram[6], gated by gfx_bank register
-					tile_render_addr <= {prev_bank_bit & gfx_bank, vram_render_D, pipe_fine_y};
-					prev_bank_bit    <= cram_render_D[6];
-					tile_shift0      <= {tile_shift0[6:0], 1'b0};
-					tile_shift1      <= {tile_shift1[6:0], 1'b0};
-				end
-
-				// fine_x=4: Tile ROM data ready. Latch into pipe.
-				3'd4: begin
-					pipe_tile0  <= tile0_D;
-					pipe_tile1  <= tile1_D;
-					tile_shift0 <= {tile_shift0[6:0], 1'b0};
-					tile_shift1 <= {tile_shift1[6:0], 1'b0};
-				end
-
-				// fine_x=5,6,7: Shift only.
-				default: begin
-					tile_shift0 <= {tile_shift0[6:0], 1'b0};
-					tile_shift1 <= {tile_shift1[6:0], 1'b0};
-				end
-
-			endcase
-		end
-	end
-end
-
-//--- Tile palette computation ---
-// Shift left, MSB out first: tile_shift[7] = current pixel bit.
-// Color bits are RBG order: cram bit0=R, bit1=B, bit2=G.
-
-wire [1:0] tile_pixel     = {tile_shift1[7], tile_shift0[7]};
-wire       tile_transparent = (tile_pixel == 2'b00);
-wire       tile_intensity   = tile_color_latch[6];
-wire [2:0] color_lo         = tile_color_latch[2:0]; // RBG for pixel==01
-wire [2:0] color_hi         = tile_color_latch[5:3]; // RBG for pixel==10
-
-wire [2:0] pen_rbg = (tile_pixel == 2'b01) ? color_lo :
-                     (tile_pixel == 2'b10) ? color_hi :
-                     (tile_pixel == 2'b11) ? (color_lo | color_hi) :
-                     3'b000;
-
-wire [4:0] r_tile = pen_rbg[0] ? (tile_intensity ? 5'd24 : 5'd31) : 5'd0;
-wire [4:0] g_tile = pen_rbg[2] ? (tile_intensity ? 5'd24 : 5'd31) : 5'd0;
-wire [4:0] b_tile = pen_rbg[1] ? (tile_intensity ? 5'd24 : 5'd31) : 5'd0;
-
-//--- Sprite line buffers (double-buffered, 256×3-bit, 0 = transparent) ---
-
-reg [2:0] linebuf0 [0:255];
-reg [2:0] linebuf1 [0:255];
-reg       linebuf_sel = 1'b0; // 0: display buf0/write buf1; 1: display buf1/write buf0
-
-// Swap at the start of each active line
+reg [7:0] mainlatch = 8'd0;
 always_ff @(posedge clk_49m) begin
 	if (!reset)
-		linebuf_sel <= 1'b0;
-	else if (cen_5m && h_cnt == 9'd0)
-		linebuf_sel <= ~linebuf_sel;
+		mainlatch <= 8'd0;
+	else if (cen_cpu && cs_mainlatch)
+		mainlatch[cpu1_A[2:0]] <= cpu1_Dout[0];
 end
 
-//--- Sprite scanner state machine (runs at clk_49m during HBlank) ---
-// Sprites are 8×16. ROM address: {tile_code[7:0], line_in_sprite[3:0]}.
-// flipY for sprite N comes from sprite N-1's byte2[7] (previous-sprite quirk).
+wire nmi_mask    = mainlatch[0];
+wire flip_screen = mainlatch[1];
+wire cpu2_rst    = ~mainlatch[2];  // CPU2 held in reset until CPU1 writes 1 to bit 2
 
-reg [3:0] spr_state;
-reg [5:0] spr_idx;
-reg [7:0] spr_byte0;          // Y position
-reg [7:0] spr_byte1;          // Tile code
-reg [7:0] spr_byte2;          // Flags: bit6=flipX, bit7=NEXT sprite's flipY
-reg [7:0] spr_byte3;          // X position
-reg       spr_flipy;          // flipY for current sprite (from previous sprite's byte2[7])
-reg       prev_sprite_flipy;  // Carry flipY forward
-reg [7:0] spr_rom_r_lat, spr_rom_b_lat, spr_rom_g_lat;
-reg [2:0] spr_pix_cnt;
-reg [7:0] next_scanline;      // v_cnt of the line being prepared
+//------------------------------------------------------- CPU2 — Sub ----------------------------------------------------------//
 
-localparam SPR_IDLE     = 4'd0;
-localparam SPR_INIT_RD  = 4'd2;
-localparam SPR_INIT_LAT = 4'd3;
-localparam SPR_RD_B0    = 4'd4;
-localparam SPR_RD_B1    = 4'd5;
-localparam SPR_RD_B2    = 4'd6;
-localparam SPR_RD_B3    = 4'd7;
-localparam SPR_ROMADDR  = 4'd8;
-localparam SPR_ROMWAIT  = 4'd9;
-localparam SPR_ROMWAIT2 = 4'd12;
-localparam SPR_PIXELS   = 4'd10;
-localparam SPR_NEXT     = 4'd11;
+wire [15:0] cpu2_A;
+wire [7:0]  cpu2_Dout;
+wire        cpu2_WR_n, cpu2_RD_n, cpu2_MREQ_n, cpu2_IORQ_n, cpu2_M1_n, cpu2_RFSH_n;
 
+T80s cpu2
+(
+	.RESET_n(reset & ~cpu2_rst),
+	.CLK(clk_49m),
+	.CEN(cen_cpu & ~pause),
+	.WAIT_n(1'b1),
+	.INT_n(~cpu2_irq),
+	.NMI_n(1'b1),
+	.M1_n(cpu2_M1_n),
+	.MREQ_n(cpu2_MREQ_n),
+	.IORQ_n(cpu2_IORQ_n),
+	.RD_n(cpu2_RD_n),
+	.WR_n(cpu2_WR_n),
+	.RFSH_n(cpu2_RFSH_n),
+	.A(cpu2_A),
+	.DI(cpu2_Din),
+	.DO(cpu2_Dout)
+);
+
+//------------------------------------------------------ CPU2 Interrupts ------------------------------------------------------//
+
+// CPU2 periodic IRQ at ~242 Hz (4 × 60.58 Hz)
+// 49,152,000 / 242 ≈ 203,107 clocks per interrupt
+reg [17:0] cpu2_irq_cnt = 18'd0;
+reg        cpu2_irq = 1'b0;
 always_ff @(posedge clk_49m) begin
-	if (!reset) begin
-		spr_state         <= SPR_IDLE;
-		spr_idx           <= 6'd0;
-		prev_sprite_flipy <= 1'b0;
+	if (!reset || cpu2_rst) begin
+		cpu2_irq_cnt <= 18'd0;
+		cpu2_irq     <= 1'b0;
 	end else begin
-		case (spr_state)
-
-			SPR_IDLE: begin
-				if (cen_5m && base_h_cnt == 9'd256) begin
-					next_scanline  <= v_cnt[7:0] + 8'd1;
-					sprite_scan_addr <= 8'hFE;
-					spr_state        <= SPR_INIT_RD;
-				end
-			end
-
-			SPR_INIT_RD: begin
-				spr_state <= SPR_INIT_LAT;
-			end
-
-			SPR_INIT_LAT: begin
-				prev_sprite_flipy <= sprite_scan_D[7];
-				spr_idx           <= 6'd0;
-				sprite_scan_addr  <= 8'd0; // sprite 0, byte 0
-				spr_state         <= SPR_RD_B0;
-			end
-
-			SPR_RD_B0: begin
-				// RAM address already set; request byte 1 for next cycle
-				sprite_scan_addr <= {spr_idx, 2'd1};
-				spr_state        <= SPR_RD_B1;
-			end
-
-			SPR_RD_B1: begin
-				// byte 0 (Y) now on bus; request byte 2
-				spr_byte0        <= sprite_scan_D;
-				sprite_scan_addr <= {spr_idx, 2'd2};
-				spr_state        <= SPR_RD_B2;
-			end
-
-			SPR_RD_B2: begin
-				// byte 1 (tile code) now on bus; request byte 3
-				spr_byte1        <= sprite_scan_D;
-				sprite_scan_addr <= {spr_idx, 2'd3};
-				spr_state        <= SPR_RD_B3;
-			end
-
-			SPR_RD_B3: begin
-				// byte 2 (flags) now on bus
-				spr_byte2 <= sprite_scan_D;
-				spr_flipy <= prev_sprite_flipy;
-				spr_state <= SPR_ROMADDR;
-			end
-
-			SPR_ROMADDR: begin
-				// byte 3 (X) now on bus
-				spr_byte3         <= sprite_scan_D;
-				prev_sprite_flipy <= spr_byte2[7];
-				begin
-					reg [8:0] raw_line;
-					// line_in_sprite = next_scanline - (sy - 1) = next_scanline - 239 + byte0
-					raw_line = {1'b0, next_scanline} - 9'd239 + {1'b0, spr_byte0};
-					if (raw_line[8] || raw_line[7:4] != 4'd0) begin
-						spr_state <= SPR_NEXT; // not on this scanline
-					end else begin
-						reg [3:0] line_in_sprite;
-						line_in_sprite  = spr_flipy ? (4'd15 - raw_line[3:0]) : raw_line[3:0];
-						spr_render_addr <= {spr_byte1, line_in_sprite};
-						spr_state       <= SPR_ROMWAIT;
-					end
-				end
-			end
-
-			SPR_ROMWAIT: begin
-				spr_state <= SPR_ROMWAIT2;
-			end
-
-			SPR_ROMWAIT2: begin
-				spr_rom_r_lat <= spr_r_D;
-				spr_rom_b_lat <= spr_b_D;
-				spr_rom_g_lat <= spr_g_D;
-				spr_pix_cnt <= 3'd0;
-				spr_state <= SPR_PIXELS;
-			end
-
-			SPR_PIXELS: begin
-				begin
-					reg [2:0] bit_pos;
-					reg [2:0] pixel_val;
-					reg [7:0] x_pos;
-					// flipX: bit0 first (pixel 0 = LSB); normal: bit7 first (pixel 0 = MSB)
-					bit_pos   = spr_byte2[6] ? spr_pix_cnt : (3'd7 - spr_pix_cnt);
-					pixel_val = {spr_rom_g_lat[bit_pos], spr_rom_b_lat[bit_pos], spr_rom_r_lat[bit_pos]};
-					x_pos     = spr_byte3 + {5'd0, spr_pix_cnt} + 8'd0;  // + 8'd2
-					if (pixel_val != 3'd0) begin
-						if (~linebuf_sel)
-							linebuf1[x_pos] <= pixel_val;
-						else
-							linebuf0[x_pos] <= pixel_val;
-					end
-					if (spr_pix_cnt == 3'd7)
-						spr_state <= SPR_NEXT;
-					else
-						spr_pix_cnt <= spr_pix_cnt + 3'd1;
-				end
-			end
-
-			SPR_NEXT: begin
-				if (spr_idx == 6'd63)
-					spr_state <= SPR_IDLE;
-				else begin
-					spr_idx          <= spr_idx + 6'd1;
-					sprite_scan_addr <= {spr_idx + 6'd1, 2'd0};
-					spr_state        <= SPR_RD_B0;
-				end
-			end
-
-			default: spr_state <= SPR_IDLE;
-		endcase
+		if (cpu2_irq_cnt == 18'd203107) begin
+			cpu2_irq_cnt <= 18'd0;
+			cpu2_irq     <= 1'b1;
+		end else
+			cpu2_irq_cnt <= cpu2_irq_cnt + 18'd1;
+		// IRQ cleared on interrupt acknowledge (IORQ + M1)
+		if (~cpu2_IORQ_n & ~cpu2_M1_n)
+			cpu2_irq <= 1'b0;
 	end
 end
 
-//--- Sprite pixel readout ---
+//-------------------------------------------------- CPU2 Address Decoding ----------------------------------------------------//
 
-//wire [2:0] sprite_pixel     = linebuf_sel ? linebuf1[h_cnt[7:0]] : linebuf0[h_cnt[7:0]];
-wire [2:0] sprite_pixel       = linebuf_sel ? linebuf1[h_cnt[7:0] - 8'd3] : linebuf0[h_cnt[7:0] - 8'd3];
+wire cpu2_mem_valid = ~cpu2_MREQ_n & cpu2_RFSH_n;
 
-// Clear display buffer as we read (becomes write buffer next line)
-always_ff @(posedge clk_49m) begin
-    if (cen_5m && visible_line) begin
-        if (linebuf_sel)
-            linebuf1[h_cnt[7:0] - 8'd3] <= 3'd0;
-        else
-            linebuf0[h_cnt[7:0] - 8'd3] <= 3'd0;
-    end
-end
+wire cs2_rom    = cpu2_mem_valid & ~cpu2_A[15] & ~cpu2_A[14] & ~cpu2_A[13]; // 0x0000-0x1FFF
+wire cs2_shared = cpu2_mem_valid & (cpu2_A[15:11] == 5'b01000);              // 0x4000-0x47FF
+wire cs2_p2     = cpu2_mem_valid & (cpu2_A[15:0] == 16'h8000);               // P2 inputs
+wire cs2_p1     = cpu2_mem_valid & (cpu2_A[15:0] == 16'h8040);               // P1 inputs
+wire cs2_system = cpu2_mem_valid & (cpu2_A[15:0] == 16'h8080);               // System inputs
 
-wire       sprite_transparent = (sprite_pixel == 3'b000);
+// CPU2 I/O: AY-3-8910 at ports 0x00-0x02
+wire cs2_ay_addr = ~cpu2_IORQ_n & ~cpu2_WR_n & (cpu2_A[3:0] == 4'h0); // Port 0x00: latch address
+wire cs2_ay_wr   = ~cpu2_IORQ_n & ~cpu2_WR_n & (cpu2_A[3:0] == 4'h1); // Port 0x01: write data
+wire cs2_ay_rd   = ~cpu2_IORQ_n & ~cpu2_RD_n & (cpu2_A[3:0] == 4'h2); // Port 0x02: read data
 
-// Sprite pixel bits: bit0=R, bit1=B, bit2=G (full brightness only)
-wire [4:0] r_sprite = sprite_pixel[0] ? 5'd31 : 5'd0;
-wire [4:0] g_sprite = sprite_pixel[2] ? 5'd31 : 5'd0;
-wire [4:0] b_sprite = sprite_pixel[1] ? 5'd31 : 5'd0;
+//---------------------------------------------------------- ROMs -------------------------------------------------------------//
 
-//--- Compositing: priority-1 tiles > sprites > priority-0 tiles > black ---
+// Main CPU ROM — 32KB (8 × 4KB ROMs e_f4..e_n5, CPU1 address space 0x0000-0x7FFF)
+wire [7:0] main_rom_D;
+eprom_32k main_rom
+(
+	.CLK(clk_49m),
+	.ADDR(cpu1_A[14:0]),
+	.CLK_DL(clk_49m),
+	.ADDR_DL(ioctl_addr),
+	.DATA_IN(ioctl_data),
+	.CS_DL(main_rom_cs_i),
+	.WR(ioctl_wr),
+	.DATA(main_rom_D)
+);
 
-wire [4:0] r_final = (tile_priority_latch && !tile_transparent) ? r_tile :
-                     (!sprite_transparent)                       ? r_sprite :
-                     r_tile;
-wire [4:0] g_final = (tile_priority_latch && !tile_transparent) ? g_tile :
-                     (!sprite_transparent)                       ? g_sprite :
-                     g_tile;
-wire [4:0] b_final = (tile_priority_latch && !tile_transparent) ? b_tile :
-                     (!sprite_transparent)                       ? b_sprite :
-                     b_tile;
+// Sub CPU ROM — 8KB (e_f2.rom @ 0x0000, e_j2.rom @ 0x1000; CPU2 address 0x0000-0x1FFF)
+wire [7:0] sub_rom_D;
+eprom_8k sub_rom
+(
+	.CLK(clk_49m),
+	.ADDR(cpu2_A[12:0]),
+	.CLK_DL(clk_49m),
+	.ADDR_DL(ioctl_addr),
+	.DATA_IN(ioctl_data),
+	.CS_DL(sub_rom_cs_i),
+	.WR(ioctl_wr),
+	.DATA(sub_rom_D)
+);
 
-assign red   = (hblk | vblk) ? 5'd0 : r_final;
-assign green = (hblk | vblk) ? 5'd0 : g_final;
-assign blue  = (hblk | vblk) ? 5'd0 : b_final;
+//------------------------------------------------------- CPU1 VRAM -----------------------------------------------------------//
+
+// BG1 VRAM — 4KB (CPU1: 0x8000-0x8FFF, mirror 0xA000-0xAFFF)
+wire [7:0] bg1_vram_D;
+dpram_dc #(.widthad_a(12)) bg1_vram
+(
+	.clock_a(clk_49m),
+	.address_a(cpu1_A[11:0]),
+	.data_a(cpu1_Dout),
+	.wren_a(cs_bg1 & ~cpu1_WR_n),
+	.q_a(bg1_vram_D),
+	.clock_b(clk_49m),
+	.address_b(12'd0), .data_b(8'd0), .wren_b(1'b0), .q_b()
+);
+
+// BG0 VRAM — 4KB (CPU1: 0x9000-0x9FFF, mirror 0xB000-0xBFFF)
+wire [7:0] bg0_vram_D;
+dpram_dc #(.widthad_a(12)) bg0_vram
+(
+	.clock_a(clk_49m),
+	.address_a(cpu1_A[11:0]),
+	.data_a(cpu1_Dout),
+	.wren_a(cs_bg0 & ~cpu1_WR_n),
+	.q_a(bg0_vram_D),
+	.clock_b(clk_49m),
+	.address_b(12'd0), .data_b(8'd0), .wren_b(1'b0), .q_b()
+);
+
+// FG VRAM — 4KB (CPU1: 0xC400-0xCFFF)
+wire [7:0] fg_vram_D;
+dpram_dc #(.widthad_a(12)) fg_vram
+(
+	.clock_a(clk_49m),
+	.address_a(cpu1_A[11:0]),
+	.data_a(cpu1_Dout),
+	.wren_a(cs_fgvram & ~cpu1_WR_n),
+	.q_a(fg_vram_D),
+	.clock_b(clk_49m),
+	.address_b(12'd0), .data_b(8'd0), .wren_b(1'b0), .q_b()
+);
+
+//------------------------------------------------------ Shared RAM -----------------------------------------------------------//
+
+// 2KB dual-port RAM — CPU1 @ 0xF000-0xF7FF, CPU2 @ 0x4000-0x47FF
+wire [7:0] shared_ram_D_cpu1, shared_ram_D_cpu2;
+dpram_dc #(.widthad_a(11)) shared_ram
+(
+	.clock_a(clk_49m),
+	.address_a(cpu1_A[10:0]),
+	.data_a(cpu1_Dout),
+	.wren_a(cs_shared & ~cpu1_WR_n),
+	.q_a(shared_ram_D_cpu1),
+	.clock_b(clk_49m),
+	.address_b(cpu2_A[10:0]),
+	.data_b(cpu2_Dout),
+	.wren_b(cs2_shared & ~cpu2_WR_n),
+	.q_b(shared_ram_D_cpu2)
+);
+
+//-------------------------------------------------- CPU1 Data Input Mux -------------------------------------------------------//
+
+wire [7:0] cpu1_Din = cs_rom    ? main_rom_D       :
+                      cs_bg1    ? bg1_vram_D        :
+                      cs_bg0    ? bg0_vram_D        :
+                      cs_fgvram ? fg_vram_D         :
+                      cs_shared ? shared_ram_D_cpu1 :
+                      8'hFF;
+
+//------------------------------------------------------ Input Wires ----------------------------------------------------------//
+
+// Invert active-HIGH MiSTer inputs to active-LOW as MAME expects
+wire [7:0] p1_inputs     = ~p1_controls;
+wire [7:0] p2_inputs     = ~p2_controls;
+wire [7:0] system_inputs = ~sys_controls;
+
+//---------------------------------------------------- AY-3-8910 --------------------------------------------------------------//
+
+// AY-3-8910 on CPU2's I/O bus. DSW reads via IOA (DSW1) and IOB (DSW2).
+wire [7:0] ay_dout;
+jt49_bus ay
+(
+	.rst_n(reset),
+	.clk(clk_49m),
+	.clk_en(cen_ay),
+	.bdir(cs2_ay_addr | cs2_ay_wr),
+	.bc1(cs2_ay_addr | cs2_ay_rd),
+	.din(cpu2_Dout),
+	.dout(ay_dout),
+	.sel(1'b1),
+	.sound(),           // Phase 1: audio not routed
+	.sample(),
+	.A(),
+	.B(),
+	.C(),
+	.IOA_in(dip_sw[7:0]),   // DSW1
+	.IOB_in(dip_sw[15:8]),  // DSW2
+	.IOA_out(),
+	.IOB_out()
+);
+
+// Phase 1: silent
+assign sound = 16'h0000;
+
+//-------------------------------------------------- CPU2 Data Input Mux -------------------------------------------------------//
+
+wire [7:0] cpu2_Din = (~cpu2_IORQ_n)   ? (cs2_ay_rd ? ay_dout : 8'hFF) :
+                      cs2_rom           ? sub_rom_D                      :
+                      cs2_shared        ? shared_ram_D_cpu2              :
+                      cs2_p2            ? p2_inputs                      :
+                      cs2_p1            ? p1_inputs                      :
+                      cs2_system        ? system_inputs                  :
+                      8'hFF;
+
+//------------------------------------------- Graphics ROM Stubs (Phase 1) ---------------------------------------------------//
+
+// Instantiated for ROM loading; rendering not implemented until Phase 2.
+wire [7:0] fgtile_D;
+eprom_8k fgtile_rom
+(
+	.CLK(clk_49m), .ADDR(13'd0),
+	.CLK_DL(clk_49m), .ADDR_DL(ioctl_addr), .DATA_IN(ioctl_data),
+	.CS_DL(fgtile_cs_i), .WR(ioctl_wr), .DATA(fgtile_D)
+);
+
+wire [7:0] sprite0_D;
+eprom_8k sprite_rom0
+(
+	.CLK(clk_49m), .ADDR(13'd0),
+	.CLK_DL(clk_49m), .ADDR_DL(ioctl_addr), .DATA_IN(ioctl_data),
+	.CS_DL(sprite0_cs_i), .WR(ioctl_wr), .DATA(sprite0_D)
+);
+
+wire [7:0] sprite1_D;
+eprom_8k sprite_rom1
+(
+	.CLK(clk_49m), .ADDR(13'd0),
+	.CLK_DL(clk_49m), .ADDR_DL(ioctl_addr), .DATA_IN(ioctl_data),
+	.CS_DL(sprite1_cs_i), .WR(ioctl_wr), .DATA(sprite1_D)
+);
+
+wire [7:0] bgtile0_D;
+eprom_8k bgtile_rom0
+(
+	.CLK(clk_49m), .ADDR(13'd0),
+	.CLK_DL(clk_49m), .ADDR_DL(ioctl_addr), .DATA_IN(ioctl_data),
+	.CS_DL(bgtile0_cs_i), .WR(ioctl_wr), .DATA(bgtile0_D)
+);
+
+wire [7:0] bgtile1_D;
+eprom_8k bgtile_rom1
+(
+	.CLK(clk_49m), .ADDR(13'd0),
+	.CLK_DL(clk_49m), .ADDR_DL(ioctl_addr), .DATA_IN(ioctl_data),
+	.CS_DL(bgtile1_cs_i), .WR(ioctl_wr), .DATA(bgtile1_D)
+);
+
+wire [7:0] prom_r_D;
+eprom_256b prom_r_rom
+(
+	.CLK(clk_49m), .ADDR(8'd0),
+	.CLK_DL(clk_49m), .ADDR_DL(ioctl_addr), .DATA_IN(ioctl_data),
+	.CS_DL(prom_r_cs_i), .WR(ioctl_wr), .DATA(prom_r_D)
+);
+
+wire [7:0] prom_g_D;
+eprom_256b prom_g_rom
+(
+	.CLK(clk_49m), .ADDR(8'd0),
+	.CLK_DL(clk_49m), .ADDR_DL(ioctl_addr), .DATA_IN(ioctl_data),
+	.CS_DL(prom_g_cs_i), .WR(ioctl_wr), .DATA(prom_g_D)
+);
+
+wire [7:0] prom_b_D;
+eprom_256b prom_b_rom
+(
+	.CLK(clk_49m), .ADDR(8'd0),
+	.CLK_DL(clk_49m), .ADDR_DL(ioctl_addr), .DATA_IN(ioctl_data),
+	.CS_DL(prom_b_cs_i), .WR(ioctl_wr), .DATA(prom_b_D)
+);
+
+wire [7:0] prom_unk_D;
+eprom_256b prom_unk_rom
+(
+	.CLK(clk_49m), .ADDR(8'd0),
+	.CLK_DL(clk_49m), .ADDR_DL(ioctl_addr), .DATA_IN(ioctl_data),
+	.CS_DL(prom_unk_cs_i), .WR(ioctl_wr), .DATA(prom_unk_D)
+);
+
+//------------------------------------------------ DIAGNOSTIC: Force Red Screen -----------------------------------------------//
+
+// Phase 1: force solid red to verify video timing path.
+// Replace with real renderer in Phase 2.
+assign red   = (hblk | vblk) ? 5'd0 : 5'd31;
+assign green = 5'd0;
+assign blue  = 5'd0;
 
 endmodule
