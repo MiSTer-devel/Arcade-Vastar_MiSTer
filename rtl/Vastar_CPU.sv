@@ -300,7 +300,7 @@ reg [2:0] r_layer; // 0=fg, 1=bg0, 2=bg1
 
 // Which line we're rendering into buffers (next visible line)
 wire [8:0] rnext = v_cnt + 9'd1;
-wire [7:0] rline = 8'd239 - rnext[7:0];
+wire [7:0] rline = 8'd255 - rnext[7:0];
 
 // Decode 2bpp pixel from byte pair
 function [1:0] pix2bpp;
@@ -349,6 +349,8 @@ always_ff @(posedge clk_49m) begin
 		if (cen_5m && base_h_cnt == 9'd256 && v_cnt >= 9'd15 && v_cnt < 9'd239) begin
 			rx <= 0;
 			rstate <= S_FG_CODE;
+			// Pre-clear sprite buffer for new line
+			for (integer i = 0; i < 256; i = i + 1) spr_lb[i] <= 8'd0;
 		end
 	end else if (wait_cycle) begin
 		wait_cycle <= 0;
@@ -358,13 +360,7 @@ always_ff @(posedge clk_49m) begin
 			wait_cycle <= 1;
 		case (rstate)
 		S_IDLE: begin
-			// Start rendering at the beginning of hblank for each visible line
-			if (cen_5m && base_h_cnt == 9'd256 && v_cnt >= 9'd15 && v_cnt < 9'd239) begin
-				rx <= 0;
-				rstate <= S_FG_CODE;
-				// Clear sprite buffer
-				// (cleared inline during S_SPR_INIT)
-			end
+			// Handled by outer else-if branch above; this arm is unreachable.
 		end
 
 		//=== FG LAYER: read code, attr, color, then ROM bytes ===

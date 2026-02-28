@@ -1,0 +1,22 @@
+{
+	"system" : {
+		"platform" : "linux64",
+		"os_name" : "\\S{PRETTY_NAME} \\r",
+		"os_version" : ""
+	},
+	"error" : {
+		"executable" : "quartus_map",
+		"comment" : "not_applicable",
+		"error_message" : "Segment Violation at 0x7f021959b618",
+		"source_file" : "unknown",
+		"line" : "0",
+		"stack_trace" : "\t0x7f0a2758abd2: db_dbs + 0x18abd2 (_ZN17GEN_STRING_RBTREEIiE11delete_treeEP22GEN_STRING_RBTREE_NODEIiE + 0x84)\n\t0x7f0a2758abe7: db_dbs + 0x18abe7 (_ZN17GEN_STRING_RBTREEIiE11delete_treeEP22GEN_STRING_RBTREE_NODEIiE + 0x99)\n\t0x7f0a2758ac44: db_dbs + 0x18ac44 (_ZN15GEN_STRING_HASHIiED2Ev + 0x3e)\n\t0x7f0a275894b8: db_dbs + 0x1894b8 (_ZN19DBS_TRANSLATOR_IMPLD2Ev + 0x70)\n\t0x7f0a2758acc3: db_dbs + 0x18acc3 (_ZNSt10unique_ptrI19DBS_TRANSLATOR_IMPLSt14default_deleteIS0_EED2Ev + 0x21)\n\t0x7f0a73e4f4bc: c.so.6 + 0x404bc (__cxa_finalize + 0x1fc)\n\t0x7f0a27588673: db_dbs + 0x188673\n\t0x7f0a74a60012: ld-linux-x86-64.so.2 + 0x2012\n\t0x7f0a74a6416e: ld-linux-x86-64.so.2 + 0x616e\n\t0x7f0a73e4fa61: c.so.6 + 0x40a61\n\t0x7f0a73e4fb3e: c.so.6 + 0x40b3e\n\t0x7f0a73e366c8: c.so.6 + 0x276c8\n\t0x7f0a73e367f9: c.so.6 + 0x277f9 (__libc_start_main + 0x89)\n\t   0x415545: quartus_map + 0x15545\n",
+		"subsystem" : "unknown"
+	},
+	"quartus" : {
+		"quartus_bits" : "64",
+		"version" : "17.0.0",
+		"build" : "595",
+		"edition" : "Lite Edition"
+	}
+}
