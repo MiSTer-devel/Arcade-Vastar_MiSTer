@@ -352,7 +352,8 @@ always_ff @(posedge clk_49m) begin
 		wait_cycle <= 0;
 	end else if (rstate == S_IDLE) begin
 		wait_cycle <= 0;
-		if (cen_5m && base_h_cnt == 9'd256 && v_cnt >= 9'd15 && v_cnt < 9'd239) begin
+//		if (cen_5m && base_h_cnt == 9'd256 && v_cnt >= 9'd15 && v_cnt < 9'd239) begin
+		if (cen_5m && base_h_cnt == 9'd224 && v_cnt >= 9'd15 && v_cnt < 9'd239) begin
 			rx <= 0;
 			rstate <= S_FG_CODE;
 			for (integer i = 0; i < 256; i = i + 1) spr_lb[i] <= 8'd0;
@@ -779,7 +780,7 @@ always_ff @(posedge clk_49m) begin
 					reg [1:0] pval;
 					reg [2:0] bx;
 					reg [7:0] xpos;
-					bx = spr_flipx ? (3'd3 - spr_col[1:0]) : spr_col[1:0];
+					bx = spr_flipx ? spr_col[1:0] : (3'd3 - spr_col[1:0]);
 					pval = {spr_byte_a[bx + 4], spr_byte_a[bx]};
 					xpos = spr_x + {4'd0, spr_col};
 					if (pval != 2'd0 && spr_lb[xpos] == 8'd0)
