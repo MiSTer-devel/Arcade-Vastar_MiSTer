@@ -38,8 +38,6 @@ module Vastar_CPU
 	input         hs_write
 );
 
-assign hs_data_out = 8'hFF;
-
 //------------------------------------------------------- Clock enables -------------------------------------------------------//
 
 wire [1:0] pix_cen_o;
@@ -173,6 +171,10 @@ eprom_8k sub_rom (.CLK(clk_49m), .ADDR(cpu2_A[12:0]), .CLK_DL(clk_49m),
 
 //------------------------------------------------------- VRAM ---------------------------------------------------------------//
 
+wire [10:0] shared_addr_a = pause ? hs_address[10:0] : cpu1_A[10:0];
+wire shared_wr_a = pause ? hs_write : (cs_shared & ~cpu1_WR_n);
+wire [7:0] shared_din_a = pause ? hs_data_in : cpu1_Dout;
+
 wire [7:0] bg1_vram_D, bg1_vram_rD;
 reg [11:0] bg1_raddr;
 dpram_dc #(.widthad_a(12)) bg1_vram (
@@ -196,8 +198,8 @@ dpram_dc #(.widthad_a(12)) fg_vram (
 
 wire [7:0] shared_ram_D_cpu1, shared_ram_D_cpu2;
 dpram_dc #(.widthad_a(11)) shared_ram (
-	.clock_a(clk_49m), .address_a(cpu1_A[10:0]), .data_a(cpu1_Dout),
-	.wren_a(cs_shared & ~cpu1_WR_n), .q_a(shared_ram_D_cpu1),
+	.clock_a(clk_49m), .address_a(shared_addr_a), .data_a(shared_din_a),
+	.wren_a(shared_wr_a), .q_a(shared_ram_D_cpu1),
 	.clock_b(clk_49m), .address_b(cpu2_A[10:0]), .data_b(cpu2_Dout),
 	.wren_b(cs2_shared & ~cpu2_WR_n), .q_b(shared_ram_D_cpu2));
 
@@ -207,6 +209,8 @@ wire [7:0] cpu1_Din = cs_rom ? main_rom_D : cs_bg1 ? bg1_vram_D : cs_bg0 ? bg0_v
 wire [7:0] p1_inputs     = p1_controls;
 wire [7:0] p2_inputs     = p2_controls;
 wire [7:0] system_inputs = sys_controls;
+
+assign hs_data_out = shared_ram_D_cpu1;
 
 //---------------------------------------------------- AY-3-8910 --------------------------------------------------------------//
 
