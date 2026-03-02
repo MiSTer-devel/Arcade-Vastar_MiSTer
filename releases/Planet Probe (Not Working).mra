@@ -1,5 +1,5 @@
 <misterromdescription>
-	<n>Vastar (Set 4)</n>
+	<n>Planet Probe</n>
 	<region>World</region>
 	<homebrew>no</homebrew>
 	<bootleg>no</bootleg>
@@ -7,11 +7,11 @@
 	<alternative></alternative>
 	<platform></platform>
 	<series></series>
-	<year>1983</year>
-	<manufacturer>Orca (Sesame Japan license)</manufacturer>
+	<year>1985</year>
+	<manufacturer>Crux/Kyugo?</manufacturer>
 	<category>Shooter</category>
 
-	<setname>vastar4</setname>
+	<setname>pprobe</setname>
 	<parent>vastar</parent>
 	<mameversion>0220</mameversion>
 	<rbf>Vastar</rbf>
@@ -40,34 +40,29 @@
 	</switches>
 
 	<!-- Index 0: All CPU + GFX ROMs -->
-	<rom index="0" md5="none" zip="vastar.zip|vastar4.zip">
+	<rom index="0" md5="none" zip="vastar.zip|pprobe.zip">
 		<!-- Main CPU ROMs 8x 4KB = 32KB (0x00000-0x07FFF) -->
-		<part crc="d2b8f177" name="3.bin"/>
-		<part crc="84531982" name="e_k4.rom"/>
-		<part crc="94a4f778" name="e_h4.rom"/>
-		<part crc="40e4d57b" name="e_l4.rom"/>
-		<part crc="bd607651" name="e_j4.rom"/>
-		<part crc="7a3779a4" name="e_n4.rom"/>
-		<part crc="31b6be39" name="e_n7.rom"/>
-		<part crc="f63f0e78" name="e_n5.rom"/>
+		<part crc="45fa5075" name="pb2.bin"/>
+		<part crc="84531982" name="pb3.bin"/>
+		<part crc="94a4f778" name="pb4.bin"/>
+		<part crc="40e4d57b" name="pb5.bin"/>
 		<!-- Sub CPU ROMs 2x 4KB = 8KB (0x08000-0x09FFF) -->
-		<part crc="713478d8" name="e_f2.rom"/>
-		<part crc="e4535442" name="e_j2.rom"/>
+		<part crc="cd624df9" name="pb1.bin"/>
 		<!-- FG tiles 8KB (0x0A000-0x0BFFF) -->
-		<part crc="34f067b6" name="c_c9.rom"/>
+		<part crc="82294dd6" name="pb9.bin"/>
 		<!-- Sprites 2x 8KB = 16KB (0x0C000-0x0FFFF) -->
-		<part crc="edbf3b13" name="c_f7.rom"/>
-		<part crc="8f309e22" name="c_f9.rom"/>
+		<part crc="8d809e45" name="pb8.bin"/>
+		<part crc="895f9dd3" name="pb10.bin"/>
 		<!-- BG tiles 0 8KB (0x10000-0x11FFF) -->
-		<part crc="b5f9c866" name="c_n4.rom"/>
+		<part crc="ff309239" name="pb6.bin"/>
 		<!-- BG tiles 1 8KB (0x12000-0x13FFF) -->
-		<part crc="c9fbbfc9" name="c_s4.rom"/>
+		<part crc="439978f7" name="pb7.bin"/>
 		<!-- Color PROMs 3x 256B (0x14000-0x142FF) -->
-		<part crc="a712d73a" name="tbp24s10.6p"/>
-		<part crc="0a7d48ec" name="tbp24s10.6s"/>
-		<part crc="4c3db907" name="tbp24s10.6m"/>
+		<part crc="dfb6b97c" name="n82s129.3"/>
+		<part crc="3cc696a2" name="n82s129.1"/>
+		<part crc="64fea033" name="dm74s287.2"/>
 		<!-- Unknown PROM 256B (0x14300-0x143FF) -->
-		<part crc="b5297a3b" name="tbp24s10.8n"/>
+		<part crc="b5297a3b" name="mmi6301-1.bin"/>
 	</rom>
 	<rom index="1"></rom>
 	<rom index="2"></rom>
