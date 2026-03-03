@@ -68,7 +68,7 @@ always_ff @(posedge clk_49m) begin
 end
 
 wire hblk = (base_h_cnt >= 9'd256);
-wire vblk = (v_cnt < 9'd16) | (v_cnt >= 9'd240);
+wire vblk = (v_cnt < 9'd17) | (v_cnt >= 9'd241);
 assign video_hblank = hblk;
 assign video_vblank = vblk;
 
@@ -198,10 +198,22 @@ dpram_dc #(.widthad_a(12)) fg_vram (
 
 wire [7:0] shared_ram_D_cpu1, shared_ram_D_cpu2;
 dpram_dc #(.widthad_a(11)) shared_ram (
-	.clock_a(clk_49m), .address_a(shared_addr_a), .data_a(shared_din_a),
-	.wren_a(shared_wr_a), .q_a(shared_ram_D_cpu1),
-	.clock_b(clk_49m), .address_b(cpu2_A[10:0]), .data_b(cpu2_Dout),
-	.wren_b(cs2_shared & ~cpu2_WR_n), .q_b(shared_ram_D_cpu2));
+    .clock_a(clk_49m),
+    .address_a(hs_write ? {3'b001, hs_address[7:0]} : cpu1_A[10:0]),
+    .data_a(hs_write ? hs_data_in : cpu1_Dout),
+    .wren_a((cs_shared & ~cpu1_WR_n) | hs_write),
+    .q_a(shared_ram_D_cpu1),
+    .clock_b(clk_49m), .address_b(cpu2_A[10:0]), .data_b(cpu2_Dout),
+    .wren_b(cs2_shared & ~cpu2_WR_n), .q_b(shared_ram_D_cpu2));
+
+wire [7:0] hs_ram_q;
+dpram_dc #(.widthad_a(8)) hs_ram (
+    .clock_a(clk_49m), .address_a(cpu1_A[7:0]),
+    .data_a(cpu1_Dout), .wren_a(cs_shared & ~cpu1_WR_n & (cpu1_A[10:8] == 3'b001)),
+    .q_a(),
+    .clock_b(clk_49m), .address_b(hs_address[7:0]),
+    .data_b(hs_data_in), .wren_b(hs_write),
+    .q_b(hs_ram_q));
 
 wire [7:0] cpu1_Din = cs_rom ? main_rom_D : cs_bg1 ? bg1_vram_D : cs_bg0 ? bg0_vram_D :
                       cs_fgvram ? fg_vram_D : cs_shared ? shared_ram_D_cpu1 : 8'hFF;
@@ -210,7 +222,7 @@ wire [7:0] p1_inputs     = p1_controls;
 wire [7:0] p2_inputs     = p2_controls;
 wire [7:0] system_inputs = sys_controls;
 
-assign hs_data_out = shared_ram_D_cpu1;
+assign hs_data_out = hs_ram_q;
 
 //---------------------------------------------------- AY-3-8910 --------------------------------------------------------------//
 
@@ -290,11 +302,18 @@ eprom_256b prom_unk_rom (.CLK(clk_49m), .ADDR(8'd0), .CLK_DL(clk_49m),
 //   pixel[x] for x=4..7: {byte_b[x-4+4], byte_b[x-4]}
 //============================================================================================================//
 
-// Line buffers: 8-bit palette index per pixel (6-bit color + 2-bit pixel value)
-reg [7:0] fg_lb  [0:255];
-reg [7:0] bg0_lb [0:255];
-reg [7:0] bg1_lb [0:255];
-reg [7:0] spr_lb [0:255]; // sprite palette index
+// Line buffers (Double Buffered): 8-bit palette index per pixel (6-bit color + 2-bit pixel value)
+reg [7:0] fg_lb_0  [0:255];
+reg [7:0] fg_lb_1  [0:255];
+reg [7:0] bg0_lb_0 [0:255];
+reg [7:0] bg0_lb_1 [0:255];
+reg [7:0] bg1_lb_0 [0:255];
+reg [7:0] bg1_lb_1 [0:255];
+reg [7:0] spr_lb_0 [0:255];
+reg [7:0] spr_lb_1 [0:255];
+
+reg lb_page = 1'b0; // 0 = render writes to _0, display reads from _1
+                    // 1 = render writes to _1, display reads from _0
 
 // Render engine state machine (runs at 49 MHz during hblank)
 reg [4:0] rstate;
@@ -357,10 +376,10 @@ always_ff @(posedge clk_49m) begin
 	end else if (rstate == S_IDLE) begin
 		wait_cycle <= 0;
 //		if (cen_5m && base_h_cnt == 9'd256 && v_cnt >= 9'd15 && v_cnt < 9'd239) begin
-		if (cen_5m && base_h_cnt == 9'd230 && v_cnt >= 9'd15 && v_cnt < 9'd239) begin
+		if (cen_5m && base_h_cnt == 9'd240 && v_cnt >= 9'd15 && v_cnt < 9'd239) begin
 			rx <= 0;
 			rstate <= S_FG_CODE;
-			for (integer i = 0; i < 256; i = i + 1) spr_lb[i] <= 8'd0;
+		    lb_page <= ~lb_page;			
 		end
 	end else if (wait_cycle) begin
 		wait_cycle <= 0;
@@ -369,15 +388,6 @@ always_ff @(posedge clk_49m) begin
 		    && rstate != S_SPR_INIT && rstate != S_DONE && rstate != S_SPR_RUN)
 			wait_cycle <= 1;
 		case (rstate)
-		S_IDLE: begin
-			// Start rendering at the beginning of hblank for each visible line
-			if (cen_5m && base_h_cnt == 9'd230 && v_cnt >= 9'd15 && v_cnt < 9'd239) begin
-				rx <= 0;
-				rstate <= S_FG_CODE;
-				// Clear sprite buffer
-				// (cleared inline during S_SPR_INIT)
-			end
-		end
 
 		//=== FG LAYER: read code, attr, color, then ROM bytes ===
 		S_FG_CODE: begin
@@ -424,23 +434,45 @@ always_ff @(posedge clk_49m) begin
 				// Normal: px 0-3 from ba, 4-7 from bb
 				// FlipX:  px 0-3 from bb reversed, 4-7 from ba reversed
 				if (r_flipx) begin
-					fg_lb[rx+7] <= {r_color, ba[7], ba[3]};
-					fg_lb[rx+6] <= {r_color, ba[6], ba[2]};
-					fg_lb[rx+5] <= {r_color, ba[5], ba[1]};
-					fg_lb[rx+4] <= {r_color, ba[4], ba[0]};
-					fg_lb[rx+3] <= {r_color, bb[7], bb[3]};
-					fg_lb[rx+2] <= {r_color, bb[6], bb[2]};
-					fg_lb[rx+1] <= {r_color, bb[5], bb[1]};
-					fg_lb[rx+0] <= {r_color, bb[4], bb[0]};
+					if (lb_page) begin
+						fg_lb_1[rx+7] <= {r_color, ba[7], ba[3]};
+						fg_lb_1[rx+6] <= {r_color, ba[6], ba[2]};
+						fg_lb_1[rx+5] <= {r_color, ba[5], ba[1]};
+						fg_lb_1[rx+4] <= {r_color, ba[4], ba[0]};
+						fg_lb_1[rx+3] <= {r_color, bb[7], bb[3]};
+						fg_lb_1[rx+2] <= {r_color, bb[6], bb[2]};
+						fg_lb_1[rx+1] <= {r_color, bb[5], bb[1]};
+						fg_lb_1[rx+0] <= {r_color, bb[4], bb[0]};
+					end else begin
+						fg_lb_0[rx+7] <= {r_color, ba[7], ba[3]};
+						fg_lb_0[rx+6] <= {r_color, ba[6], ba[2]};
+						fg_lb_0[rx+5] <= {r_color, ba[5], ba[1]};
+						fg_lb_0[rx+4] <= {r_color, ba[4], ba[0]};
+						fg_lb_0[rx+3] <= {r_color, bb[7], bb[3]};
+						fg_lb_0[rx+2] <= {r_color, bb[6], bb[2]};
+						fg_lb_0[rx+1] <= {r_color, bb[5], bb[1]};
+						fg_lb_0[rx+0] <= {r_color, bb[4], bb[0]};
+					end
 				end else begin
-					fg_lb[rx+7] <= {r_color, bb[4], bb[0]};
-					fg_lb[rx+6] <= {r_color, bb[5], bb[1]};
-					fg_lb[rx+5] <= {r_color, bb[6], bb[2]};
-					fg_lb[rx+4] <= {r_color, bb[7], bb[3]};
-					fg_lb[rx+3] <= {r_color, ba[4], ba[0]};
-					fg_lb[rx+2] <= {r_color, ba[5], ba[1]};
-					fg_lb[rx+1] <= {r_color, ba[6], ba[2]};
-					fg_lb[rx+0] <= {r_color, ba[7], ba[3]};
+					if (lb_page) begin
+						fg_lb_1[rx+7] <= {r_color, bb[4], bb[0]};
+						fg_lb_1[rx+6] <= {r_color, bb[5], bb[1]};
+						fg_lb_1[rx+5] <= {r_color, bb[6], bb[2]};
+						fg_lb_1[rx+4] <= {r_color, bb[7], bb[3]};
+						fg_lb_1[rx+3] <= {r_color, ba[4], ba[0]};
+						fg_lb_1[rx+2] <= {r_color, ba[5], ba[1]};
+						fg_lb_1[rx+1] <= {r_color, ba[6], ba[2]};
+						fg_lb_1[rx+0] <= {r_color, ba[7], ba[3]};
+					end else begin
+						fg_lb_0[rx+7] <= {r_color, bb[4], bb[0]};
+						fg_lb_0[rx+6] <= {r_color, bb[5], bb[1]};
+						fg_lb_0[rx+5] <= {r_color, bb[6], bb[2]};
+						fg_lb_0[rx+4] <= {r_color, bb[7], bb[3]};
+						fg_lb_0[rx+3] <= {r_color, ba[4], ba[0]};
+						fg_lb_0[rx+2] <= {r_color, ba[5], ba[1]};
+						fg_lb_0[rx+1] <= {r_color, ba[6], ba[2]};
+						fg_lb_0[rx+0] <= {r_color, ba[7], ba[3]};
+					end
 				end
 			end
 			rx <= rx + 9'd8;
@@ -514,23 +546,45 @@ always_ff @(posedge clk_49m) begin
 				ba = r_byte_a;
 				bb = bgtile0_D;
 				if (r_flipx) begin
-					bg0_lb[rx+7] <= {r_color, ba[7], ba[3]};
-					bg0_lb[rx+6] <= {r_color, ba[6], ba[2]};
-					bg0_lb[rx+5] <= {r_color, ba[5], ba[1]};
-					bg0_lb[rx+4] <= {r_color, ba[4], ba[0]};
-					bg0_lb[rx+3] <= {r_color, bb[7], bb[3]};
-					bg0_lb[rx+2] <= {r_color, bb[6], bb[2]};
-					bg0_lb[rx+1] <= {r_color, bb[5], bb[1]};
-					bg0_lb[rx+0] <= {r_color, bb[4], bb[0]};
+					if (lb_page) begin
+						bg0_lb_1[rx+7] <= {r_color, ba[7], ba[3]};
+						bg0_lb_1[rx+6] <= {r_color, ba[6], ba[2]};
+						bg0_lb_1[rx+5] <= {r_color, ba[5], ba[1]};
+						bg0_lb_1[rx+4] <= {r_color, ba[4], ba[0]};
+						bg0_lb_1[rx+3] <= {r_color, bb[7], bb[3]};
+						bg0_lb_1[rx+2] <= {r_color, bb[6], bb[2]};
+						bg0_lb_1[rx+1] <= {r_color, bb[5], bb[1]};
+						bg0_lb_1[rx+0] <= {r_color, bb[4], bb[0]};
+					end else begin
+						bg0_lb_0[rx+7] <= {r_color, ba[7], ba[3]};
+						bg0_lb_0[rx+6] <= {r_color, ba[6], ba[2]};
+						bg0_lb_0[rx+5] <= {r_color, ba[5], ba[1]};
+						bg0_lb_0[rx+4] <= {r_color, ba[4], ba[0]};
+						bg0_lb_0[rx+3] <= {r_color, bb[7], bb[3]};
+						bg0_lb_0[rx+2] <= {r_color, bb[6], bb[2]};
+						bg0_lb_0[rx+1] <= {r_color, bb[5], bb[1]};
+						bg0_lb_0[rx+0] <= {r_color, bb[4], bb[0]};
+					end
 				end else begin
-					bg0_lb[rx+7] <= {r_color, bb[4], bb[0]};
-					bg0_lb[rx+6] <= {r_color, bb[5], bb[1]};
-					bg0_lb[rx+5] <= {r_color, bb[6], bb[2]};
-					bg0_lb[rx+4] <= {r_color, bb[7], bb[3]};
-					bg0_lb[rx+3] <= {r_color, ba[4], ba[0]};
-					bg0_lb[rx+2] <= {r_color, ba[5], ba[1]};
-					bg0_lb[rx+1] <= {r_color, ba[6], ba[2]};
-					bg0_lb[rx+0] <= {r_color, ba[7], ba[3]};
+					if (lb_page) begin
+						bg0_lb_1[rx+7] <= {r_color, bb[4], bb[0]};
+						bg0_lb_1[rx+6] <= {r_color, bb[5], bb[1]};
+						bg0_lb_1[rx+5] <= {r_color, bb[6], bb[2]};
+						bg0_lb_1[rx+4] <= {r_color, bb[7], bb[3]};
+						bg0_lb_1[rx+3] <= {r_color, ba[4], ba[0]};
+						bg0_lb_1[rx+2] <= {r_color, ba[5], ba[1]};
+						bg0_lb_1[rx+1] <= {r_color, ba[6], ba[2]};
+						bg0_lb_1[rx+0] <= {r_color, ba[7], ba[3]};
+					end else begin
+						bg0_lb_0[rx+7] <= {r_color, bb[4], bb[0]};
+						bg0_lb_0[rx+6] <= {r_color, bb[5], bb[1]};
+						bg0_lb_0[rx+5] <= {r_color, bb[6], bb[2]};
+						bg0_lb_0[rx+4] <= {r_color, bb[7], bb[3]};
+						bg0_lb_0[rx+3] <= {r_color, ba[4], ba[0]};
+						bg0_lb_0[rx+2] <= {r_color, ba[5], ba[1]};
+						bg0_lb_0[rx+1] <= {r_color, ba[6], ba[2]};
+						bg0_lb_0[rx+0] <= {r_color, ba[7], ba[3]};
+					end
 				end
 			end
 			rx <= rx + 9'd8;
@@ -603,23 +657,45 @@ always_ff @(posedge clk_49m) begin
 				ba = r_byte_a;
 				bb = bgtile1_D;
 				if (r_flipx) begin
-					bg1_lb[rx+7] <= {r_color, ba[7], ba[3]};
-					bg1_lb[rx+6] <= {r_color, ba[6], ba[2]};
-					bg1_lb[rx+5] <= {r_color, ba[5], ba[1]};
-					bg1_lb[rx+4] <= {r_color, ba[4], ba[0]};
-					bg1_lb[rx+3] <= {r_color, bb[7], bb[3]};
-					bg1_lb[rx+2] <= {r_color, bb[6], bb[2]};
-					bg1_lb[rx+1] <= {r_color, bb[5], bb[1]};
-					bg1_lb[rx+0] <= {r_color, bb[4], bb[0]};
+					if (lb_page) begin
+						bg1_lb_1[rx+7] <= {r_color, ba[7], ba[3]};
+						bg1_lb_1[rx+6] <= {r_color, ba[6], ba[2]};
+						bg1_lb_1[rx+5] <= {r_color, ba[5], ba[1]};
+						bg1_lb_1[rx+4] <= {r_color, ba[4], ba[0]};
+						bg1_lb_1[rx+3] <= {r_color, bb[7], bb[3]};
+						bg1_lb_1[rx+2] <= {r_color, bb[6], bb[2]};
+						bg1_lb_1[rx+1] <= {r_color, bb[5], bb[1]};
+						bg1_lb_1[rx+0] <= {r_color, bb[4], bb[0]};
+					end else begin
+						bg1_lb_0[rx+7] <= {r_color, ba[7], ba[3]};
+						bg1_lb_0[rx+6] <= {r_color, ba[6], ba[2]};
+						bg1_lb_0[rx+5] <= {r_color, ba[5], ba[1]};
+						bg1_lb_0[rx+4] <= {r_color, ba[4], ba[0]};
+						bg1_lb_0[rx+3] <= {r_color, bb[7], bb[3]};
+						bg1_lb_0[rx+2] <= {r_color, bb[6], bb[2]};
+						bg1_lb_0[rx+1] <= {r_color, bb[5], bb[1]};
+						bg1_lb_0[rx+0] <= {r_color, bb[4], bb[0]};
+					end
 				end else begin
-					bg1_lb[rx+7] <= {r_color, bb[4], bb[0]};
-					bg1_lb[rx+6] <= {r_color, bb[5], bb[1]};
-					bg1_lb[rx+5] <= {r_color, bb[6], bb[2]};
-					bg1_lb[rx+4] <= {r_color, bb[7], bb[3]};
-					bg1_lb[rx+3] <= {r_color, ba[4], ba[0]};
-					bg1_lb[rx+2] <= {r_color, ba[5], ba[1]};
-					bg1_lb[rx+1] <= {r_color, ba[6], ba[2]};
-					bg1_lb[rx+0] <= {r_color, ba[7], ba[3]};
+					if (lb_page) begin
+						bg1_lb_1[rx+7] <= {r_color, bb[4], bb[0]};
+						bg1_lb_1[rx+6] <= {r_color, bb[5], bb[1]};
+						bg1_lb_1[rx+5] <= {r_color, bb[6], bb[2]};
+						bg1_lb_1[rx+4] <= {r_color, bb[7], bb[3]};
+						bg1_lb_1[rx+3] <= {r_color, ba[4], ba[0]};
+						bg1_lb_1[rx+2] <= {r_color, ba[5], ba[1]};
+						bg1_lb_1[rx+1] <= {r_color, ba[6], ba[2]};
+						bg1_lb_1[rx+0] <= {r_color, ba[7], ba[3]};
+					end else begin
+						bg1_lb_0[rx+7] <= {r_color, bb[4], bb[0]};
+						bg1_lb_0[rx+6] <= {r_color, bb[5], bb[1]};
+						bg1_lb_0[rx+5] <= {r_color, bb[6], bb[2]};
+						bg1_lb_0[rx+4] <= {r_color, bb[7], bb[3]};
+						bg1_lb_0[rx+3] <= {r_color, ba[4], ba[0]};
+						bg1_lb_0[rx+2] <= {r_color, ba[5], ba[1]};
+						bg1_lb_0[rx+1] <= {r_color, ba[6], ba[2]};
+						bg1_lb_0[rx+0] <= {r_color, ba[7], ba[3]};
+					end
 				end
 			end
 			rx <= rx + 9'd8;
@@ -636,7 +712,11 @@ always_ff @(posedge clk_49m) begin
 		// Y/Col @ fgvram[rambase+0x000], Attr @ fgvram[rambase+0x400], Code/X @ fgvram[rambase+0x800]
 		S_SPR_INIT: begin
 			// Clear sprite buffer
-			for (integer i = 0; i < 256; i = i + 1) spr_lb[i] <= 8'd0;
+			if (lb_page) begin
+				for (integer i = 0; i < 256; i = i + 1) spr_lb_1[i] <= 8'd0;
+			end else begin
+				for (integer i = 0; i < 256; i = i + 1) spr_lb_0[i] <= 8'd0;
+			end
 			spr_idx <= 0;
 			spr_state <= 0;
 			rstate <= S_SPR_RUN;
@@ -787,8 +867,13 @@ always_ff @(posedge clk_49m) begin
 					bx = spr_flipx ? spr_col[1:0] : (3'd3 - spr_col[1:0]);
 					pval = {spr_byte_a[bx + 4], spr_byte_a[bx]};
 					xpos = spr_x + {4'd0, spr_col};
-					if (pval != 2'd0 && spr_lb[xpos] == 8'd0)
-						spr_lb[xpos] <= {spr_color, pval};
+					if (lb_page) begin
+						if (pval != 2'd0 && spr_lb_1[xpos] == 8'd0)
+							spr_lb_1[xpos] <= {spr_color, pval};
+					end else begin
+						if (pval != 2'd0 && spr_lb_0[xpos] == 8'd0)
+							spr_lb_0[xpos] <= {spr_color, pval};
+					end
 				end
 				if (spr_col == 4'd15) begin
 					// Done with this sprite
@@ -821,10 +906,10 @@ end
 
 //--- Display compositing ---
 wire [7:0] disp_x = 8'd255 - base_h_cnt[7:0];
-wire [7:0] fg_pix  = fg_lb[disp_x];
-wire [7:0] bg0_pix = bg0_lb[disp_x];
-wire [7:0] bg1_pix = bg1_lb[disp_x];
-wire [7:0] spr_pix = spr_lb[disp_x];
+wire [7:0] fg_pix  = lb_page ? fg_lb_0[disp_x]  : fg_lb_1[disp_x];
+wire [7:0] bg0_pix = lb_page ? bg0_lb_0[disp_x] : bg0_lb_1[disp_x];
+wire [7:0] bg1_pix = lb_page ? bg1_lb_0[disp_x] : bg1_lb_1[disp_x];
+wire [7:0] spr_pix = lb_page ? spr_lb_0[disp_x] : spr_lb_1[disp_x];
 
 wire fg_opaque  = (fg_pix[1:0]  != 2'd0);
 wire bg0_opaque = (bg0_pix[1:0] != 2'd0);
