@@ -58,14 +58,23 @@ wire cen_ay = cen_cpu & ~ay_toggle & ~pause;
 //-------------------------------------------------------- Video timing --------------------------------------------------------//
 
 reg [8:0] base_h_cnt = 9'd0;
-reg [8:0] v_cnt = 9'd0;
+reg [8:0] v_cnt      = 9'd0;
+
+wire [8:0] h_cnt_rot;
+wire [8:0] v_cnt_rot;
+
+// XOR-based flip
+assign h_cnt_rot = { base_h_cnt[8], base_h_cnt[7:0] ^ {8{flip_screen}} };
+assign v_cnt_rot = { v_cnt[8],      v_cnt[7:0]      ^ {8{flip_screen}} };
+
 always_ff @(posedge clk_49m) begin
 	if (cen_pix) begin
 		if (base_h_cnt == 9'd287) begin
 			base_h_cnt <= 9'd0;
 			v_cnt <= (v_cnt == 9'd263) ? 9'd0 : v_cnt + 9'd1;
-		end else
+		end else begin
 			base_h_cnt <= base_h_cnt + 9'd1;
+		end
 	end
 end
 
@@ -78,8 +87,8 @@ wire [8:0] hs_start = 9'd264 + {5'd0, h_center};
 wire [8:0] hs_end   = hs_start + 9'd16;
 wire [8:0] vs_start = 9'd248 + {5'd0, v_center};
 wire [8:0] vs_end   = vs_start + 9'd4;
-assign video_hsync = (base_h_cnt >= hs_start && base_h_cnt < hs_end);
-assign video_vsync = (v_cnt >= vs_start && v_cnt < vs_end);
+assign video_hsync = (h_cnt_rot >= hs_start && h_cnt_rot < hs_end);
+assign video_vsync = (v_cnt_rot >= vs_start && v_cnt_rot < vs_end);
 assign video_csync = ~(video_hsync ^ video_vsync);
 
 //------------------------------------------------------- CPU1 — Main ---------------------------------------------------------//
@@ -122,7 +131,7 @@ always_ff @(posedge clk_49m) begin
 	else if (cen_cpu && cs_mainlatch) mainlatch[cpu1_A[2:0]] <= cpu1_Dout[0];
 end
 wire nmi_mask    = mainlatch[0];
-wire flip_screen = mainlatch[1];
+wire flip_screen = rot_flip ^ mainlatch[1];
 wire cpu2_rst    = ~mainlatch[2];
 
 //------------------------------------------------------- CPU2 — Sub ----------------------------------------------------------//
@@ -330,8 +339,8 @@ reg [7:0] r_scroll;
 reg [2:0] r_layer; // 0=fg, 1=bg0, 2=bg1
 
 // Which line we're rendering into buffers (next visible line)
-wire [8:0] rnext     = v_cnt + 9'd1;
-wire [7:0] rline     = rot_flip ? ~rnext[7:0] : (8'd255 - rnext[7:0]);
+wire [8:0] rnext     = v_cnt_rot + 9'd1;
+wire [7:0] rline     = (8'd255 - rnext[7:0]);
 
 // Decode 2bpp pixel from byte pair
 function [1:0] pix2bpp;
@@ -378,8 +387,8 @@ always_ff @(posedge clk_49m) begin
 		wait_cycle <= 0;
 	end else if (rstate == S_IDLE) begin
 		wait_cycle <= 0;
-//		if (cen_pix && base_h_cnt == 9'd256 && v_cnt >= 9'd15 && v_cnt < 9'd240) begin
-		if (cen_pix && base_h_cnt == 9'd240 && v_cnt >= 9'd15 && v_cnt < 9'd241) begin
+//		if (cen_pix && h_cnt_rot == 9'd256 && v_cnt_rot >= 9'd15 && v_cnt_rot < 9'd240) begin
+		if (cen_pix && h_cnt_rot == 9'd240 && v_cnt_rot >= 9'd15 && v_cnt_rot < 9'd241) begin
 			rx <= 0;
 			rstate <= S_FG_CODE;
 		    lb_page <= ~lb_page;			
@@ -792,8 +801,8 @@ always_ff @(posedge clk_49m) begin
 					tilebase = (spr_idx < 8) ? 8'd128 : 8'd0; // 0x80/2=64 for bank0, 0 for bank1
 					code = {spr_attr_raw[0], spr_code_raw[7:2]} + tilebase;
 					spr_code <= code;
-					spr_flipy <= spr_code_raw[0];
-					spr_flipx <= spr_code_raw[1];
+					spr_flipy <= spr_code_raw[0] ^ rot_flip;
+					spr_flipx <= spr_code_raw[1] ^ rot_flip;
 					spr_dbl <= spr_attr_raw[3];
 				end
 				spr_state <= 6;
@@ -806,7 +815,6 @@ always_ff @(posedge clk_49m) begin
 					sy = flip_screen ? spr_y : (spr_dbl ? (8'd224 - spr_y) : (8'd240 - spr_y));
 					sprite_height = spr_dbl ? 8'd32 : 8'd16;
 					local_y = {1'b0, rline} - {1'b0, sy};
-//					local_y = {1'b0, spr_rline} - {1'b0, sy};
 					if (local_y[8:0] < {1'b0, sprite_height}) begin
 						// Sprite is on this line — start pixel rendering
 						spr_row <= local_y[4:0];
@@ -869,10 +877,8 @@ always_ff @(posedge clk_49m) begin
 					reg [2:0] bx;
 					reg [7:0] xpos;
 					bx = spr_flipx ? spr_col[1:0] : (3'd3 - spr_col[1:0]);
-//					bx = (spr_flipx ^ rot_flip) ? spr_col[1:0] : (3'd3 - spr_col[1:0]);
 					pval = {spr_byte_a[bx + 4], spr_byte_a[bx]};
-//					xpos = spr_x + {4'd0, spr_col};
-					xpos = rot_flip ? ~(spr_x + {4'd0, spr_col}) : (spr_x + {4'd0, spr_col});
+					xpos = rot_flip	? (8'd255 - (spr_x + {4'd0, spr_col})): (spr_x + {4'd0, spr_col});
 					if (lb_page) begin
 						if (pval != 2'd0 && spr_lb_1[xpos] == 8'd0)
 							spr_lb_1[xpos] <= {spr_color, pval};
@@ -911,8 +917,7 @@ always_ff @(posedge clk_49m) begin
 end
 
 //--- Display compositing ---
-wire [7:0] disp_x = 8'd255 - base_h_cnt[7:0];
-// wire [7:0] disp_x = rot_flip ? base_h_cnt[7:0] : (8'd255 - base_h_cnt[7:0]);
+wire [7:0] disp_x = 8'd255 - h_cnt_rot[7:0];
 wire [7:0] fg_pix  = lb_page ? fg_lb_0[disp_x]  : fg_lb_1[disp_x];
 wire [7:0] bg0_pix = lb_page ? bg0_lb_0[disp_x] : bg0_lb_1[disp_x];
 wire [7:0] bg1_pix = lb_page ? bg1_lb_0[disp_x] : bg1_lb_1[disp_x];
