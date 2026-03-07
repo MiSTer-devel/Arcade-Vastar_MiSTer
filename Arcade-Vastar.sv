@@ -476,8 +476,8 @@ arcade_video #(256, 24) arcade_video
 // Assemble player control bytes for Vastar (active HIGH)
 // p1/p2: {2'b00, btn2, btn1, right, left, down, up}
 // sys:   {2'b00, service, start2, start1, 1'b0, coin2, coin1}
-wire [7:0] p1_controls  = {2'b00, m_fire1b, m_fire1, m_right1, m_left1, m_down1, m_up1};
-wire [7:0] p2_controls  = {2'b00, m_fire2b, m_fire2, m_right2, m_left2, m_down2, m_up2};
+wire [7:0] p1_controls  = {2'b00, m_fire1b, m_fire1, m_right1, m_left1, rot_flip ? m_up1 : m_down1, rot_flip ? m_down1 : m_up1};
+wire [7:0] p2_controls  = {2'b00, m_fire2b, m_fire2, m_right2, m_left2, rot_flip ? m_up2 : m_down2, rot_flip ? m_down2 : m_up2};
 wire [7:0] sys_controls = {2'b00, btn_service, m_start2, m_start1, 1'b0, m_coin2, m_coin1};
 
 // Instantiate Vastar top-level module
