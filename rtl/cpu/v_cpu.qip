@@ -1,3 +1,4 @@
+set_global_assignment -name VHDL_FILE rtl/cpu/T80/T80pa.vhd
 set_global_assignment -name VHDL_FILE rtl/cpu/T80/T80s.vhd
 set_global_assignment -name VHDL_FILE rtl/cpu/T80/T80.vhd
 set_global_assignment -name VHDL_FILE rtl/cpu/T80/T80_ALU.vhd
