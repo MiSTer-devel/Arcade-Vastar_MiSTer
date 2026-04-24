@@ -249,7 +249,13 @@ jt49_bus ay (
 	.sound(ay_sound), .sample(), .A(), .B(), .C(),
 	.IOA_in(dip_sw[7:0]), .IOB_in(dip_sw[15:8]), .IOA_out(), .IOB_out()
 );
-assign sound = {ay_sound[9], ay_sound, 5'd0};
+// assign sound = {ay_sound[9], ay_sound, 5'd0};
+
+// jt49 sound is UNSIGNED 10-bit (see jt49.v line 34). Previous code
+// sign-extended the MSB which caused mid-scale wrap (ay_sound >= 512
+// flipped to large negative) — audible as buzzing/static on loud notes.
+// Pad a 0 MSB and upshift into the signed 16-bit frame instead.
+assign sound = {1'b0, ay_sound, 5'd0};
 
 wire [7:0] cpu2_Din = (~cpu2_IORQ_n) ? (cs2_ay_rd ? ay_dout : 8'hFF) :
                       cs2_rom ? sub_rom_D : cs2_shared ? shared_ram_D_cpu2 :
