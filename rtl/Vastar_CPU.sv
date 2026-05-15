@@ -332,8 +332,9 @@ reg [7:0] bg1_lb_1 [0:255];
 reg [7:0] spr_lb_0 [0:255];
 reg [7:0] spr_lb_1 [0:255];
 
-reg lb_page = 1'b0; // 0 = render writes to _0, display reads from _1
-                    // 1 = render writes to _1, display reads from _0
+reg lb_page; // 0 = render writes to _0, display reads from _1
+             // 1 = render writes to _1, display reads from _0
+             // Driven solely by the page-flip always_ff at end of this file.
 
 // Render engine state machine (runs at 49 MHz during hblank)
 reg [4:0] rstate;
@@ -346,8 +347,16 @@ reg [7:0] r_byte_a, r_byte_b;
 reg [7:0] r_scroll;
 reg [2:0] r_layer; // 0=fg, 1=bg0, 2=bg1
 
-// Which line we're rendering into buffers (next visible line)
-wire [8:0] rnext     = v_cnt_rot + 9'd1;
+// Which line we're rendering into buffers.
+// H4 (2026-05-15) moved the page-flip to end-of-line, so display at v_cnt=N reads
+// the buffer that was rendered AT v_cnt=N-1. The +1 in rnext used to compensate
+// for OLD code's mid-visible flip race; with the flip now in hblank that +1 is
+// off-by-one and shifts the displayed content up by 1 line (FPGA-top = MAME-right
+// after 90° CW rotation = the 1px garbage strip user reported).
+// Vault note H1 attempted this same change pre-H4 and it broke things — that
+// was the race interaction, not this formula. Grok's diagnosis was correct;
+// it just needed H4 to be in place first.
+wire [8:0] rnext     = v_cnt_rot;
 wire [7:0] rline     = (8'd255 - rnext[7:0]);
 
 // Decode 2bpp pixel from byte pair
@@ -395,11 +404,12 @@ always_ff @(posedge clk_49m) begin
 		wait_cycle <= 0;
 	end else if (rstate == S_IDLE) begin
 		wait_cycle <= 0;
-//		if (cen_pix && h_cnt_rot == 9'd256 && v_cnt_rot >= 9'd15 && v_cnt_rot < 9'd240) begin
-		if (cen_pix && h_cnt_rot == 9'd240 && v_cnt_rot >= 9'd15 && v_cnt_rot < 9'd241) begin
+		// Trigger render at start of line (base_h_cnt==0). Render takes ~156 cen_pix
+		// ticks out of 288 available, so it always completes well before end-of-line.
+		// Page flip is handled separately at base_h_cnt==287 (see below).
+		if (cen_pix && base_h_cnt == 9'd0 && v_cnt_rot >= 9'd15 && v_cnt_rot < 9'd241) begin
 			rx <= 0;
 			rstate <= S_FG_CODE;
-		    lb_page <= ~lb_page;			
 		end
 	end else if (wait_cycle) begin
 		wait_cycle <= 0;
@@ -921,6 +931,17 @@ always_ff @(posedge clk_49m) begin
 
 		default: rstate <= S_IDLE;
 		endcase
+	end
+end
+
+// Double-buffer page flip — fires at end-of-line (base_h_cnt==287, fully in hblank),
+// only on lines that had a render. Render completes ~halfway through the line,
+// so it's guaranteed done well before this point. Sole driver of lb_page.
+always_ff @(posedge clk_49m) begin
+	if (!reset) begin
+		lb_page <= 1'b0;
+	end else if (cen_pix && base_h_cnt == 9'd287 && v_cnt_rot >= 9'd15 && v_cnt_rot < 9'd241) begin
+		lb_page <= ~lb_page;
 	end
 end
 

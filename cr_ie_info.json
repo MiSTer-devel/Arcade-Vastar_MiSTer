@@ -5,18 +5,18 @@
 		"os_version" : ""
 	},
 	"error" : {
-		"executable" : "quartus_map",
+		"executable" : "quartus_fit",
 		"comment" : "not_applicable",
-		"error_message" : "Segment Violation at 0x7fb164d8ea18",
+		"error_message" : "Segment Violation at 0x7f42af7a6cc0",
 		"source_file" : "unknown",
 		"line" : "0",
-		"stack_trace" : "\t0x7fb91a38abd2: db_dbs + 0x18abd2 (_ZN17GEN_STRING_RBTREEIiE11delete_treeEP22GEN_STRING_RBTREE_NODEIiE + 0x84)\n\t0x7fb91a38abe7: db_dbs + 0x18abe7 (_ZN17GEN_STRING_RBTREEIiE11delete_treeEP22GEN_STRING_RBTREE_NODEIiE + 0x99)\n\t0x7fb91a38ac44: db_dbs + 0x18ac44 (_ZN15GEN_STRING_HASHIiED2Ev + 0x3e)\n\t0x7fb91a3894a0: db_dbs + 0x1894a0 (_ZN19DBS_TRANSLATOR_IMPLD2Ev + 0x58)\n\t0x7fb91a38acc3: db_dbs + 0x18acc3 (_ZNSt10unique_ptrI19DBS_TRANSLATOR_IMPLSt14default_deleteIS0_EED2Ev + 0x21)\n\t0x7fb966c4f4bc: c.so.6 + 0x404bc (__cxa_finalize + 0x1fc)\n\t0x7fb91a388673: db_dbs + 0x188673\n\t0x7fb9678df012: ld-linux-x86-64.so.2 + 0x2012\n\t0x7fb9678e316e: ld-linux-x86-64.so.2 + 0x616e\n\t0x7fb966c4fa61: c.so.6 + 0x40a61\n\t0x7fb966c4fb3e: c.so.6 + 0x40b3e\n\t0x7fb966c366c8: c.so.6 + 0x276c8\n\t0x7fb966c367f9: c.so.6 + 0x277f9 (__libc_start_main + 0x89)\n\t   0x415545: quartus_map + 0x15545\n",
+		"stack_trace" : "\t0x7f03218a0680: periph_fpp + 0xa0680 (_ZN11FPP_RR_NODE6freezeEv + 0xf0)\n\t0x7f032187d221: periph_fpp + 0x7d221 (_ZN10FPP_DEVICE6freezeEv + 0xd1)\n\t0x7f02d1068f1b: periph_pcc + 0x68f1b (_ZN12PCC_ENV_IMPL4loadEv + 0xab)\n\t0x7f02d106974c: periph_pcc + 0x6974c (_ZN12PCC_ENV_IMPL18refresh_fpp_designEv + 0x1c)\n\t0x7f02c7262238: fitter_fsv + 0x62238 (_ZN28FSV_PERIPHERY_PLACEMENT_UTIL22do_auto_promote_io_stdEv + 0xc8)\n\t0x7f02c724bd32: fitter_fsv + 0x4bd32 (_ZNK10FSV_EXPERT46auto_promote_io_std_and_create_complement_pinsEv + 0xb2)\n\t0x7f02c7254b1e: fitter_fsv + 0x54b1e (_ZN10FSV_EXPERT26fitter_preparation_pre_fppEv + 0xdce)\n\t0x7f02c7254f38: fitter_fsv + 0x54f38 (_ZN10FSV_EXPERT18fitter_preparationEv + 0x38)\n\t0x7f02c7248d2a: fitter_fsv + 0x48d2a (_ZNK15FSV_EXPERT_BASE18fitter_preparationEv + 0x18a)\n\t0x7f02c72498b0: fitter_fsv + 0x498b0 (_ZNK15FSV_EXPERT_BASE13invoke_fitterEv + 0x990)\n\t0x7f02c724593b: fitter_fsv + 0x4593b (fsv_execute + 0x41b)\n\t0x7f02d962457e: fitter_fmain + 0x2457e (_Z11fmain_startP10CMP_FACADE + 0x4ae)\n\t0x7f02c481f826: comp_qfit_legacy_flow + 0x1f826 (_Z16qfit_execute_fitP13QCU_FRAMEWORKP14QFIT_FRAMEWORK + 0x1d6)\n\t0x7f02c481bda2: comp_qfit_legacy_flow + 0x1bda2 (_ZN14QFIT_FRAMEWORK7executeEv + 0x282)\n\t0x7f02c4823568: comp_qfit_legacy_flow + 0x23568 (qfit_legacy_flow_run_legacy_fitter_flow + 0x218)\n\t0x7f02ed84d671: tcl8.6 + 0x4d671 (TclInvokeStringCommand + 0x81)\n\t0x7f02ed851ec7: tcl8.6 + 0x51ec7 (TclNRRunCallbacks + 0x47)\n\t0x7f02ed8536e7: tcl8.6 + 0x536e7 (TclEvalEx + 0x947)\n\t0x7f02ed8fb366: tcl8.6 + 0xfb366 (Tcl_FSEvalFileEx + 0x266)\n\t0x7f02ed8fb47e: tcl8.6 + 0xfb47e (Tcl_EvalFile + 0x2e)\n\t0x7f0322811ebc: comp_qexe + 0x11ebc (_Z24qexe_evaluate_tcl_scriptRKSs + 0x382)\n\t0x7f0322818dcf: comp_qexe + 0x18dcf (_ZL11qexe_do_tclP14QEXE_FRAMEWORKRKSsS2_RKSt4listISsSaISsEEbb + 0x597)\n\t0x7f0322819d7b: comp_qexe + 0x19d7b (_Z19qexe_run_tcl_optionP14QEXE_FRAMEWORKPKcPSt4listISsSaISsEEb + 0x57e)\n\t0x7f032403e06a: comp_qcu + 0x3e06a (_Z18qcu_run_tcl_optionP13QCU_FRAMEWORKPKcPSt4listISsSaISsEEb + 0x1065)\n\t0x7f032281c586: comp_qexe + 0x1c586 (_Z18qexe_standard_mainP14QEXE_FRAMEWORKPPK22QEXE_OPTION_DEFINITIONiPPKc + 0x6b3)\n\t   0x403b75: quartus_fit + 0x3b75 (_Z10qfit2_mainiPPKc + 0xc5)\n\t0x7f02f6a40720: ccl_msg + 0x40720 (_Z15msg_main_threadPv + 0x10)\n\t0x7f02f1c0602c: ccl_thr + 0x602c (thr_final_wrapper + 0xc)\n\t0x7f02f6a407df: ccl_msg + 0x407df (_Z18msg_thread_wrapperPFPvS_ES_ + 0x62)\n\t0x7f02f280a559: ccl_mem + 0xa559 (_Z18mem_thread_wrapperPFPvS_ES_ + 0x99)\n\t0x7f02f2408f92: ccl_err + 0x8f92 (_Z18err_thread_wrapperPFPvS_ES_ + 0x27)\n\t0x7f02f1c063f2: ccl_thr + 0x63f2 (thr_thread_wrapper + 0x15)\n\t0x7f02f6a427e2: ccl_msg + 0x427e2 (_Z12msg_exe_mainiPPKcPFiiS1_E + 0xa3)\n\t0x7f02eb8276c1: c.so.6 + 0x276c1\n\t0x7f02eb8277f9: c.so.6 + 0x277f9 (__libc_start_main + 0x89)\n\t   0x4030b5: quartus_fit + 0x30b5\n",
 		"subsystem" : "unknown"
 	},
 	"quartus" : {
 		"quartus_bits" : "64",
-		"version" : "17.0.0",
-		"build" : "595",
+		"version" : "17.0.2",
+		"build" : "602",
 		"edition" : "Lite Edition"
 	}
 }
