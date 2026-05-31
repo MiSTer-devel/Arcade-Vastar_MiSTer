@@ -819,8 +819,12 @@ always_ff @(posedge clk_49m) begin
 					tilebase = (spr_idx < 8) ? 8'd128 : 8'd0; // 0x80/2=64 for bank0, 0 for bank1
 					code = {spr_attr_raw[0], spr_code_raw[7:2]} + tilebase;
 					spr_code <= code;
-					spr_flipy <= spr_code_raw[0] ^ rot_flip;
-					spr_flipx <= spr_code_raw[1] ^ rot_flip;
+					// DIAG-REVERT-2026-05-31: PP sprites inside-out — ^rot_flip inverts within-sprite
+					// bit order (erow/bx) for Planet Probe only; rot_flip=0 for Vastar so no-op there.
+					// spr_flipy <= spr_code_raw[0] ^ rot_flip;
+					// spr_flipx <= spr_code_raw[1] ^ rot_flip;
+					spr_flipy <= spr_code_raw[0];   // DIAG: drop ^rot_flip → PP reads bits in Vastar's order
+					spr_flipx <= spr_code_raw[1];   // DIAG: drop ^rot_flip
 					spr_dbl <= spr_attr_raw[3];
 				end
 				spr_state <= 6;
