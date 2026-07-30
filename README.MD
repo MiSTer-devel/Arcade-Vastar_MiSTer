@@ -1,5 +1,6 @@
 <p align="center">
   <img src="Useful Information/Vastar.png" width="800">
+  <img src="Useful Information/PlanetProbe.png" width="800">
 </p>
 
 <h1 align="center">Vastar FPGA Core</h1>
@@ -13,6 +14,8 @@
 ## Overview
 
 FPGA implementation of **Vastar (1983)**, originally developed and released by Orca (Sesame Japan license).
+
+This also implements **Planet Probe (1985)**, originally developed and released by Orca/Komax/Crux team.
 
 This core targets MiSTer FPGA and aims for accurate gameplay behavior, video timing, and sound reproduction.
 
