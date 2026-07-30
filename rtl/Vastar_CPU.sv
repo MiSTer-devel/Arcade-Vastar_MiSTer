@@ -840,8 +840,23 @@ always_ff @(posedge clk_49m) begin
 					// count-down was corrupting the other axis simultaneously, so neither polarity could
 					// ever look right. With xpos now an origin-only mirror, this is a clean single variable.
 					// Vastar unaffected (rot_flip=0 => XOR is identity).
-					spr_flipy <= spr_code_raw[0] ^ rot_flip;
-					spr_flipx <= spr_code_raw[1];   // DIAG: X drops ^rot_flip (confirmed correct without it)
+					// PP-SPRITE-FLIP-USE-FLIPSCREEN-2026-07-30: MAME gates the per-sprite flip inversion on
+					// flip_screen, NOT rot_flip (vastar_viddev.cpp: `if (m_flip_screen) { flipx = !flipx;
+					// flipy = !flipy; }`). Here flip_screen = rot_flip ^ mainlatch[1], a DIFFERENT signal —
+					// for PP that is 1^1 = 0, i.e. NO inversion. That is why neither rot_flip polarity could
+					// satisfy both sprite populations: symmetric ships and diagonal bullets were being
+					// judged against a globally wrong sense. Both flips now use flip_screen, matching MAME.
+					// DIAG-REVERT-2026-07-30: originals were `^ rot_flip` (flipy) and `^ rot_flip` (flipx).
+					spr_flipy <= spr_code_raw[0] ^ flip_screen;
+					// PP-SPRITE-FLIPX-XOR-RESTORE-2026-07-30: ^rot_flip goes back, matching flipy. HW showed
+					// all sprites internally 180 out (invisible on the symmetric ones, obvious on diagonals).
+					// May's "X is correct without the XOR" test was invalid: flipx=1 then triggered the
+					// PARTIAL mirror (quarter order never reversed), so setting it looked like garbage.
+					// With PP-SPRITE-FLIPX-QUARTER-FIX in place flipx=1 is a complete mirror, so the XOR is
+					// finally testable on its own. Vastar unaffected (rot_flip=0 => identity).
+					// DIAG-REVERT-2026-07-30: original below
+					// spr_flipx <= spr_code_raw[1];   // DIAG: X drops ^rot_flip (confirmed correct without it)
+					spr_flipx <= spr_code_raw[1] ^ flip_screen;   // see flip_screen note above
 					spr_dbl <= spr_attr_raw[3];
 				end
 				spr_state <= 6;
@@ -885,7 +900,16 @@ always_ff @(posedge clk_49m) begin
 						base = {spr_code[7:1], 7'd0}; // code/2 * 128
 					else
 						base = {spr_code, 6'd0}; // code * 64
-					quarter = spr_col[3:2]; // which quarter (0-3)
+					// PP-SPRITE-FLIPX-QUARTER-FIX-2026-07-30: per-sprite flipx was a PARTIAL mirror — bx
+					// (:909) reverses pixels within a 4-px group, but the group order was never reversed,
+					// giving a 4-px-granular scramble whenever the game sets flipx=1. Only visible on
+					// sprites that USE the bit: diagonals reuse one tile + flip bits, cardinals have their
+					// own tiles with the bits clear — hence "inside out only at 45 degrees". Vastar never
+					// sets the bit, so it stayed hidden. flipy needs no equivalent: erow = 15-spr_row
+					// already reverses erow[3] (which 8-row block) and erow[2:0] together.
+					// DIAG-REVERT-2026-07-30: original below
+					// quarter = spr_col[3:2]; // which quarter (0-3)
+					quarter = spr_flipx ? (2'd3 - spr_col[3:2]) : spr_col[3:2];
 					// Byte offset within sprite: row_base + quarter*8
 					// row_base = (erow < 8) ? erow : 32 + (erow-8)  for 16x16
 					// For 32 tall: (erow < 8) ? erow : (erow < 16) ? 32+(erow-8) : (erow < 24) ? 64+(erow-16) : 96+(erow-24)
