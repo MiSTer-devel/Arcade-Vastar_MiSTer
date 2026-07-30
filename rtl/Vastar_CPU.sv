@@ -823,7 +823,24 @@ always_ff @(posedge clk_49m) begin
 					// bit order (erow/bx) for Planet Probe only; rot_flip=0 for Vastar so no-op there.
 					// spr_flipy <= spr_code_raw[0] ^ rot_flip;
 					// spr_flipx <= spr_code_raw[1] ^ rot_flip;
-					spr_flipy <= spr_code_raw[0] ^ rot_flip;   // DIAG: Y KEEPS ^rot_flip (was upside-down without it)
+					// PP-SPRITE-DOUBLE-MIRROR-FIX-2026-07-29: sprites were mirrored TWICE on both axes while
+					// tiles mirror once. rline (=255-rnext) already carries the vertical mirror into spr_row
+					// via local_y, so XOR-ing rot_flip into spr_flipy reverses erow a SECOND time. Paired
+					// with the xpos change below (which removes the same redundancy on the other axis) —
+					// dropping either alone leaves the sprite 180 out, which is why both erow directions
+					// previously tested as "upside down". Vastar unaffected (rot_flip=0 => XOR is identity).
+					// DIAG-REVERT-2026-07-29: original below
+					// spr_flipy <= spr_code_raw[0] ^ rot_flip;   // DIAG: Y KEEPS ^rot_flip (was upside-down without it)
+					// PP-SPRITE-FLIPY-RESTORE-FIX-2026-07-30: the ^rot_flip goes BACK. erow is the only
+					// mechanism that touches internal pixel order on the SCANLINE axis without touching
+					// placement, and for PP the scanline axis is the displayed HORIZONTAL. HW: placement
+					// correct, displayed-horizontal internal order flipped (visible only on asymmetric /
+					// angled sprites — every PP sprite is symmetrical head-on) => erow by elimination.
+					// The historic "both erow directions = upside down" tests were CONFOUNDED: the xpos
+					// count-down was corrupting the other axis simultaneously, so neither polarity could
+					// ever look right. With xpos now an origin-only mirror, this is a clean single variable.
+					// Vastar unaffected (rot_flip=0 => XOR is identity).
+					spr_flipy <= spr_code_raw[0] ^ rot_flip;
 					spr_flipx <= spr_code_raw[1];   // DIAG: X drops ^rot_flip (confirmed correct without it)
 					spr_dbl <= spr_attr_raw[3];
 				end
@@ -900,7 +917,23 @@ always_ff @(posedge clk_49m) begin
 					reg [7:0] xpos;
 					bx = spr_flipx ? spr_col[1:0] : (3'd3 - spr_col[1:0]);
 					pval = {spr_byte_a[bx + 4], spr_byte_a[bx]};
-					xpos = rot_flip	? (8'd255 - (spr_x + {4'd0, spr_col})): (spr_x + {4'd0, spr_col});
+					// PP-SPRITE-DOUBLE-MIRROR-FIX-2026-07-29: write in SOURCE order like tiles do. Tiles
+					// write lb[rx] with rx ascending and get their mirror once, from disp_x=255-h_cnt_rot
+					// at read time. Sprites were pre-mirroring HERE too, then being read through that same
+					// disp_x => mirrored twice. Paired with the spr_flipy change above. This is Experiment 3
+					// from the 2026-05-15 note — queued then, never run. Vastar unaffected (rot_flip=0
+					// already selected this branch).
+					// DIAG-REVERT-2026-07-29: original below
+					// xpos = rot_flip	? (8'd255 - (spr_x + {4'd0, spr_col})): (spr_x + {4'd0, spr_col});
+					// PP-SPRITE-ORIGIN-MIRROR-FIX-2026-07-29 (supersedes the source-order version below): the old
+					// `255 - (spr_x + spr_col)` did TWO jobs at once — mirrored the sprite's PLACEMENT and
+					// reversed its INTERNAL pixel order. HW showed removing it fixed orientation but put the
+					// player at the top and enemies at the bottom, i.e. placement needs the mirror and the
+					// internal order does not. So mirror the ORIGIN only and let spr_col still ascend:
+					// sprite spans source cols spr_x..spr_x+15, mirrored span is (240-spr_x)..(255-spr_x).
+					// Width is always 16 (spr_col wraps at 15 even when spr_dbl doubles the HEIGHT), so the
+					// constant is 255-15 = 240. Vastar unaffected (rot_flip=0 takes the plain branch).
+					xpos = rot_flip ? ((8'd240 - spr_x) + {4'd0, spr_col}) : (spr_x + {4'd0, spr_col});
 					if (lb_page) begin
 						if (pval != 2'd0 && spr_lb_1[xpos] == 8'd0)
 							spr_lb_1[xpos] <= {spr_color, pval};
