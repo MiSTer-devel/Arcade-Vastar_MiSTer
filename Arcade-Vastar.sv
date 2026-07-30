@@ -334,45 +334,13 @@ assign cfg_write = 0;
 assign cfg_address = 0;
 assign cfg_data = 0;
 
-// Holds the core in reset for a margin (~0.34s) after BOTH ioctl_download finishes AND
-// the PLL locks, counted on CLK_50M (runs regardless of PLL lock). Releasing reset as
-// soon as ioctl_download deasserts and the PLL reports locked is too early: the Z80 can
-// fetch its reset vector before ROM/RAM/clocks are fully settled and run init against
-// garbage RAM (visible on Planet Probe as an unworkable "99 credits" state). Over-holding
-// reset at boot is harmless; if this margin is ever too short, widen the counter width.
-reg [24:0] boot_rst_cnt = 25'd0;
-wire       boot_settled = locked & ~ioctl_download;
-always @(posedge CLK_50M) begin
-	if (!boot_settled)          boot_rst_cnt <= 25'd0;              // restart wait if download/lock drops
-	else if (~boot_rst_cnt[24]) boot_rst_cnt <= boot_rst_cnt + 1'b1;
-end
-wire boot_hold = ~boot_rst_cnt[24];   // 1 until the post-settle margin elapses (~0.34s @50MHz)
+// Hold both Z80s in reset until the PLL is locked and the ROM download has finished, so they never
+// execute against an unstable clock or partial ROM data.
+wire reset = RESET | status[0] | buttons[1] | ioctl_download | ~locked;
 
-// Planet Probe's power-on RAM test ($7E53) fails from cold-zero RAM roughly half the time
-// and hard-locks; a reset always cures it once RAM has been touched once. This block
-// automates that: after the first boot has had time to run (past the game's own startup
-// delay and RAM test), it asserts reset once more, then latches off permanently. Do not
-// remove this without another fix for the cold-boot RAM test lockup.
-// boot_settled (= locked & ~ioctl_download) is defined in the boot_rst_cnt block above.
-reg [27:0] rk_cnt  = 28'd0;
-reg        rk_done = 1'b0;
-// Tunable timing (CLK_50M, so value = seconds * 50e6):
-localparam [27:0] KICK_AT  = 28'd100000000;  // ~2.0s after settle: first-boot window -> RAISE for a longer delay
-localparam [27:0] KICK_END = 28'd133000000;  // ~2.66s: end of the reset kick, then latch off forever
-always @(posedge CLK_50M) begin
-	if (!boot_settled) rk_cnt <= 28'd0;
-	else if (!rk_done) begin
-		rk_cnt <= rk_cnt + 1'b1;
-		if (rk_cnt >= KICK_END) rk_done <= 1'b1;   // latch -> never kick again
-	end
-end
-wire rekick = boot_settled & ~rk_done & (rk_cnt >= KICK_AT);   // reset asserted KICK_AT..KICK_END after settle
-
-wire reset = RESET | status[0] | buttons[1] | ioctl_download | ~locked | boot_hold | rekick;
-
-// Async-assert / sync-deassert reset synchronizer. Raw `reset` above is a combinational
-// OR of async terms (HPS reset/download, PLL ~locked) and the CLK_50M boot_hold counter,
-// but it feeds CPUs running on CLK_49M. Releasing it unsynchronized lets the CPU catch the
+// Async-assert / sync-deassert reset synchronizer. Raw `reset` above is a combinational OR of
+// async terms (HPS reset/download, PLL ~locked), but it feeds CPUs running on CLK_49M. Releasing
+// it unsynchronized lets the CPU catch the
 // deassert at a random CLK_49M phase each boot, causing intermittent bad boots. Registering
 // the release onto CLK_49M gives a clean, deterministic edge instead.
 reg [1:0] rst_sync = 2'b11;
