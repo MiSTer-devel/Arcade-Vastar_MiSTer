@@ -64,6 +64,7 @@
 		<!-- Unknown PROM 256B (0x14300-0x143FF) -->
 		<part crc="b5297a3b" name="mmi6301-1.bin"/>
 	</rom>
+	<!-- core_config byte: bit0 = rot_flip (1 = Planet Probe, rotate CCW) -->
 	<rom index="1">
 	    <part>
 		01

@@ -329,17 +329,17 @@ pll_cfg pll_cfg
 	.reconfig_from_pll(reconfig_from_pll)
 );
 
-// No PLL reconfiguration needed for Blue Print
+// No PLL reconfiguration is used
 assign cfg_write = 0;
 assign cfg_address = 0;
 assign cfg_data = 0;
 
-// Planet Probe cold-boot fix (2026-05-31): the Z80 was fetching its reset vector before
-// program ROM/RAM/clocks were fully settled -> ran init on a not-all-there state -> garbage
-// RAM ("99 credits", unworkable). A manual soft reset always cured it; ioctl_download + ~locked
-// released the auto reset too early. Hold the core in reset for a margin (~0.34s) AFTER both
-// ioctl_download finishes AND the PLL locks. Counted on CLK_50M (alive regardless of PLL lock).
-// Over-holding reset at boot is harmless; if it's still short, widen the counter bit.
+// Holds the core in reset for a margin (~0.34s) after BOTH ioctl_download finishes AND
+// the PLL locks, counted on CLK_50M (runs regardless of PLL lock). Releasing reset as
+// soon as ioctl_download deasserts and the PLL reports locked is too early: the Z80 can
+// fetch its reset vector before ROM/RAM/clocks are fully settled and run init against
+// garbage RAM (visible on Planet Probe as an unworkable "99 credits" state). Over-holding
+// reset at boot is harmless; if this margin is ever too short, widen the counter width.
 reg [24:0] boot_rst_cnt = 25'd0;
 wire       boot_settled = locked & ~ioctl_download;
 always @(posedge CLK_50M) begin
@@ -348,11 +348,11 @@ always @(posedge CLK_50M) begin
 end
 wire boot_hold = ~boot_rst_cnt[24];   // 1 until the post-settle margin elapses (~0.34s @50MHz)
 
-// DIAG-REVERT-2026-05-31: one-time auto re-kick for the PP cold-boot RAM-test lockup.
-// The game's power-on RAM test ($7E53) fails ~50% from cold-zero RAM and hard-locks, but a
-// reset ALWAYS cures it (RAM-persistence — proven, see pprobe disasm). So after the first boot
-// has run (~1.3s, past the game's own delay + RAM test), assert reset once more, then latch off
-// — an automatic version of the manual soft reset that works 100%.
+// Planet Probe's power-on RAM test ($7E53) fails from cold-zero RAM roughly half the time
+// and hard-locks; a reset always cures it once RAM has been touched once. This block
+// automates that: after the first boot has had time to run (past the game's own startup
+// delay and RAM test), it asserts reset once more, then latches off permanently. Do not
+// remove this without another fix for the cold-boot RAM test lockup.
 // boot_settled (= locked & ~ioctl_download) is defined in the boot_rst_cnt block above.
 reg [27:0] rk_cnt  = 28'd0;
 reg        rk_done = 1'b0;
@@ -370,12 +370,11 @@ wire rekick = boot_settled & ~rk_done & (rk_cnt >= KICK_AT);   // reset asserted
 
 wire reset = RESET | status[0] | buttons[1] | ioctl_download | ~locked | boot_hold | rekick;
 
-// DIAG-REVERT-2026-05-31: async-assert / sync-deassert reset synchronizer. Raw `reset` above
-// is a combinational OR of async terms (HPS reset/download, PLL ~locked) + the CLK_50M boot_hold
-// counter, fed to CPUs running on CLK_49M. Releasing it unsynchronized = the CPU catches the
-// deassert at a random CLK_49M phase each boot -> PP intermittently boots "really wrong".
-// Register the release onto CLK_49M for a clean, deterministic edge.
-// Revert: feed the core `.reset(~reset)` instead of `.reset(~reset_sync)` and delete this block.
+// Async-assert / sync-deassert reset synchronizer. Raw `reset` above is a combinational
+// OR of async terms (HPS reset/download, PLL ~locked) and the CLK_50M boot_hold counter,
+// but it feeds CPUs running on CLK_49M. Releasing it unsynchronized lets the CPU catch the
+// deassert at a random CLK_49M phase each boot, causing intermittent bad boots. Registering
+// the release onto CLK_49M gives a clean, deterministic edge instead.
 reg [1:0] rst_sync = 2'b11;
 always @(posedge CLK_49M or posedge reset) begin
 	if (reset) rst_sync <= 2'b11;
@@ -466,7 +465,8 @@ always @(posedge CLK_49M) begin
 		dip_sw[ioctl_addr[2:0]] <= ioctl_dout;
 end
 
-// Vastar or Planet Probe
+// Variant select byte, loaded from the MRA's rom index="1" (see releases/*.mra).
+// bit0: 0 = Vastar (rotate CW), 1 = Planet Probe (rotate CCW).
 reg [7:0] core_config = 8'd0;
 always_ff @(posedge CLK_49M) begin
     if (ioctl_wr && ioctl_index == 8'd1)
@@ -523,7 +523,6 @@ arcade_video #(256, 24) arcade_video
 // Assemble player control bytes for Vastar (active HIGH)
 // p1/p2: {2'b00, btn2, btn1, right, left, down, up}
 // sys:   {2'b00, service, start2, start1, 1'b0, coin2, coin1}
-// wire [7:0] p1_controls  = {2'b00, m_fire1b, m_fire1, rot_flip ? m_left1 : m_right1, rot_flip ? m_right1 : m_left1, rot_flip ? m_up1 : m_down1, rot_flip ? m_down1 : m_up1};
 wire [7:0] p1_controls  = {2'b00, m_fire1b, m_fire1, m_right1, m_left1, m_down1, m_up1};
 wire [7:0] p2_controls  = {2'b00, m_fire2b, m_fire2, m_right2, m_left2, m_down2, m_up2};
 wire [7:0] sys_controls = {2'b00, btn_service, m_start2, m_start1, 1'b0, m_coin2, m_coin1};

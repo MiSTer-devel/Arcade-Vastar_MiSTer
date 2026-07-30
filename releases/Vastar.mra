@@ -69,6 +69,7 @@
 		<!-- Unknown PROM 256B (0x14300-0x143FF) -->
 		<part crc="b5297a3b" name="tbp24s10.8n"/>
 	</rom>
+	<!-- core_config byte: bit0 = rot_flip (0 = Vastar, rotate CW) -->
 	<rom index="1">
 	    <part>
 		00
